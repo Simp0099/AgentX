@@ -2,6 +2,36 @@
 
 Honest, direct list of what this project does not (yet) do well.
 
+## Agent chat and deployment failure modes
+
+The Chat tab uses a language model to select among six existing tools:
+`inspect_image`, `run_localizer`, `validate_prediction`, `generate_ela`,
+`inspect_metadata`, and `compare_evidence`. The model does not provide a
+separate detector and does not change the trained weights. Its tool choices
+can be incomplete or malformed; provider timeouts, rate limits, unavailable
+models, or a missing API credential can stop agent mode. In those cases the
+handler may use `run_investigation`, and the answer is labeled **fixed pipeline
+(no LLM)**. A missing checkpoint causes localizer errors; a corrupt or
+unsupported upload can prevent all image analysis.
+
+The localizer's score is an uncalibrated review signal, not a probability or
+proof. A clean result does not establish authenticity, and the Chat model can
+misread evidence or explain it incorrectly. Review the tool results and image
+yourself. ELA and the localizer are limited to splice-style evidence and can
+miss fully AI-generated images or uniformly re-encoded edits.
+
+Chat conversation history is kept in Gradio state. Long-term memory stores
+investigation records in `artifacts/memory/investigations.db`, keyed by image
+hash and run configuration; it may return a prior matching result. Uploaded
+chat images are stored under `artifacts/uploads`, while per-turn work copies
+are removed. Tool and API paths are resolved and checked against that upload
+root, including symlinks. The API defaults to loopback; exposing it publicly
+without `AGENT_API_TOKEN` is unsafe.
+
+The [README model comparison table](../README.md#agent-model-comparison) shows
+tool-call compatibility measurements. Those one-shot probes do not measure
+forensic accuracy or guarantee that a provider will be available at runtime.
+
 ## Boxes are a crude shape for splices
 
 Real tampered regions are irregular. A rectangle around a curved cutout

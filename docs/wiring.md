@@ -1,26 +1,29 @@
 # App wiring map
 
-Entry point named by the Dockerfile and README: `app/app.py`. Search found one Gradio app construction (`gr.Blocks`) and one `demo.launch()` in that file. The orchestrator module is imported by the app but not yet invoked by `analyze()`; therefore the app execution path is not yet agent-orchestrated.
+Entry point named by the Dockerfile and README: `app/app.py`. The single Gradio app construction has **Analysis** and **Chat** tabs. Analysis routes through `app.handler.analyze` to `agent.orchestrator.run_investigation`. Chat routes through `app.chat_handler.agent_chat` to `agent.loop.run_agent_full`; when the model is unavailable it invokes `run_investigation` and labels the result `fixed pipeline (no LLM)`. Both paths use the existing tools and localizer.
 
 | Module | Imported by app.py? | Classification |
 |---|---:|---|
-| `agent/batch.py` | No | LIBRARY ONLY |
-| `agent/config.py` | Yes, transitively through orchestrator | Imported but unused by app inference |
-| `agent/orchestrator.py` | Yes, module import | Wired import; not called |
+| `agent/batch.py` | Yes | WIRED for Analysis ZIP processing |
+| `agent/chat_handler.py` | Through app wrapper | WIRED for Chat, image state, and ELA fallback |
+| `agent/config.py` | Yes, through orchestrator/tools | WIRED for thresholds and forensic settings |
+| `agent/loop.py` | Through chat handler | WIRED for model-selected tool loop |
+| `agent/orchestrator.py` | Through handlers | WIRED for Analysis and no-LLM fallback |
+| `agent/agent_tools.py` | Through Chat handler | WIRED for model-facing tool dispatch |
 | `agent/planner.py` | No | LIBRARY ONLY |
-| `agent/policy.py` | Yes, transitively through orchestrator | Imported but unused by app inference |
+| `agent/policy.py` | Yes, through orchestrator | WIRED for deterministic conditional checks |
 | `agent/rendering.py` | Yes | WIRED |
 | `agent/reporting.py` | No | LIBRARY ONLY |
 | `agent/schemas.py` | Yes | WIRED |
 | `agent/summary.py` | No | LIBRARY ONLY |
-| `agent/tool_registry.py` | Yes, transitively through orchestrator | Imported but unused by app inference |
-| `agent/tools/common.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/compare_evidence.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/generate_ela.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/inspect_image.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/inspect_metadata.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/run_localizer.py` | Yes, transitively through registry | Imported but unused by app inference |
-| `agent/tools/validate_prediction.py` | Yes, transitively through registry | Imported but unused by app inference |
+| `agent/tool_registry.py` | Yes, through orchestrator | WIRED for deterministic checks |
+| `agent/tools/common.py` | Yes, through tool implementations | WIRED for bounded tool execution |
+| `agent/tools/compare_evidence.py` | Yes, through registry/model tools | WIRED |
+| `agent/tools/generate_ela.py` | Yes, through registry/model tools | WIRED |
+| `agent/tools/inspect_image.py` | Yes, through registry/model tools | WIRED |
+| `agent/tools/inspect_metadata.py` | Yes, through registry/model tools | WIRED |
+| `agent/tools/run_localizer.py` | Yes, through registry/model tools | WIRED |
+| `agent/tools/validate_prediction.py` | Yes, through registry/model tools | WIRED |
 | `agent/verdict.py` | Yes | WIRED |
 | `scripts/download_data.py` | No | LIBRARY/CLI ONLY |
 | `scripts/evaluate_agent.py` | No | LIBRARY/CLI ONLY |

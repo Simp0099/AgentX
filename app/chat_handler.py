@@ -207,6 +207,7 @@ def agent_chat(
     tool_log: list[dict[str, str]] = []
     ela: Image.Image | None = None
     reused = False
+    fallback_reason = ""
     try:
         try:
             result: AgentResult = run_agent_full(
@@ -216,6 +217,7 @@ def agent_chat(
                 client=client,
             )
             if result.stopped_reason == "model_unavailable":
+                fallback_reason = "No configured model provider was available."
                 raise RuntimeError("model unavailable")
             reused = result.steps == 0 and not any(
                 item.get("tool_calls") for item in result.messages
@@ -274,7 +276,9 @@ def agent_chat(
                 "**fixed pipeline (no LLM)**\n\n"
                 + render_record(record)
                 + "\n\n"
-                + escape_untrusted(f"Agent unavailable: {type(exc).__name__}")
+                + escape_untrusted(
+                    fallback_reason or f"Agent request failed ({type(exc).__name__})."
+                )
             )
             updated_history = history + [
                 {"role": "user", "content": escape_untrusted(message)},

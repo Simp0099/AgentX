@@ -143,10 +143,27 @@ def test_bad_path_is_a_200_with_an_error_dict(client, upload_dir):
 
 
 def test_path_outside_upload_root_is_refused(client):
-    response = client.post("/tools/inspect_image", json={"image_path": "/etc/hosts"})
+    response = client.post("/tools/inspect_image", json={"image_path": "/etc/passwd"})
 
     assert response.status_code == 200
     assert "outside the allowed upload directory" in response.json()["error"]
+
+
+def test_api_rejects_parent_traversal_and_external_symlink(client, upload_dir):
+    outside = upload_dir.parent / "outside.png"
+    Image.new("RGB", (8, 8), "white").save(outside)
+    symlink = upload_dir / "outside-link.png"
+    symlink.symlink_to(outside)
+    try:
+        paths = [upload_dir / ".." / outside.name, symlink]
+        for path in paths:
+            response = client.post("/tools/inspect_image", json={"image_path": str(path)})
+            assert response.status_code == 200
+            assert "error" in response.json()
+            assert "outside the allowed upload directory" in response.json()["error"]
+    finally:
+        symlink.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

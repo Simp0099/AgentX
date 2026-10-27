@@ -215,6 +215,28 @@ Command: `rg -n -A2 -B1 'name: Lint|name: Tests|ruff check|pytest tests/' .githu
 
 The workflow lints all five named directories. The pytest command collects `tests/` only; it does not pass `src/`, `app/`, or `scripts/` as pytest collection roots.
 
+## Phase 11 secret-safe deployment checks
+
+The Phase 11 Docker build and history inspection were **not run** in this
+environment. `docker version --format '{{.Server.Version}}'` could not connect
+to Docker Desktop's socket, including on an elevated retry. No API key was
+passed as a build argument. `.dockerignore` excludes `.env`, `.env.*`,
+`artifacts/`, `logs/`, and `.git/` from the build context.
+
+When Docker Desktop is running, build, inspect, and run with only the provider
+variables the configured agent uses:
+
+```bash
+docker build -t deepfake-localizer:phase-11 .
+docker history --no-trunc deepfake-localizer:phase-11
+mkdir -p artifacts
+docker run --rm -p 7860:7860 -v "$PWD/artifacts:/app/artifacts" \
+  -e OPENROUTER_API_KEY -e GEMINI_API_KEY deepfake-localizer:phase-11
+```
+
+Inspect the `docker history` output before deploying. The Dockerfile contains
+no API-key `ARG` or `ENV` instructions; pass credentials only to `docker run`.
+
 ## Local CI commands and raw output
 
 Command: `source .venv311/bin/activate && python -m pytest tests/ -v`
