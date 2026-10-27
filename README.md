@@ -198,35 +198,97 @@ cross-dataset evaluation. Details: **[EVALUATION.md](EVALUATION.md)**.
 
 ## Forensic agent
 
-The Gradio app routes image investigations through `agent.orchestrator`.
-Deterministic code always runs image inspection, the localizer, and prediction
-validation. The configured policy may then run ELA generation, metadata
-inspection, or evidence comparison based on the score, validation result, and
-investigation goal. Calls are bounded by configured timeouts and a per-image
-tool budget; unsupported planner proposals are rejected and recorded.
+The Gradio app has two paths. **Analysis** uses the deterministic
+`agent.orchestrator.run_investigation` pipeline. **Chat** uses
+`agent.loop.run_agent_full`, which lets a configured language model choose
+among the approved tools below, reads each result, and then answers. The model
+does not replace or change the trained localizer.
 
-An optional Anthropic planner is used only when both `ANTHROPIC_API_KEY` and
-`ANTHROPIC_MODEL` are set. It can request tools from the approved conditional
-registry, but it cannot run commands, choose arbitrary paths, or set the
-verdict. Without those environment values, the deterministic policy still
-produces an investigation record and verdict. Verdicts come from explicit
-rules and use the categories **Flagged for review**, **Flagged, region
-unavailable**, **Not flagged by this detector**, and **Inconclusive**.
+| Tool | Purpose |
+|---|---|
+| `inspect_image` | Check image readability, dimensions, format, and SHA-256. |
+| `run_localizer` | Run the existing ELA-based classifier/localizer. |
+| `validate_prediction` | Check the returned score and box. |
+| `generate_ela` | Write an ELA map for visual review. |
+| `inspect_metadata` | Read selected image metadata. |
+| `compare_evidence` | Compare evidence gathered earlier in the run. |
 
-The UI labels the model output `tampered score (uncalibrated)`. It displays
-only checks recorded as executed, and shows ELA or a localization overlay only
-when the corresponding evidence was produced. Filenames, goal text, and
-metadata are treated as untrusted content when rendered. The app supports
-multiple image uploads and ZIP batch validation; PDF reports are generated
-from structured investigation records. Email delivery is not implemented.
+### Run the agent
 
-This pipeline does not prove whether an image was manipulated, identify its
-source, or provide a calibrated probability. The optional planner does not
-change model weights or preprocessing, and no improvement over the baseline
-has been established on a real labeled benchmark. Email is not implemented.
-See [docs/wiring.md](docs/wiring.md) for module details and
-[docs/evaluation.md](docs/evaluation.md) for the pre-registered evaluation
-criterion.
+```bash
+git clone https://github.com/Simp0099/Ai-Deepfake-Tampering-Localizer.git
+cd Ai-Deepfake-Tampering-Localizer
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+For model-driven Chat, make `OPENROUTER_API_KEY` and/or `GEMINI_API_KEY`
+available through your shell or a secrets manager. Do not put their values in
+the repository. OpenRouter is the configured primary; the configured fallback
+models use OpenRouter and Gemini. With no working provider key, Chat runs the
+deterministic pipeline and labels the answer **fixed pipeline (no LLM)**.
+
+```bash
+python app/app.py
+```
+
+Open <http://localhost:7860>, choose **Chat**, upload an image, enter a question,
+and click **Ask**. The expandable evidence panel shows tool arguments, status,
+and result previews; ELA appears beside the answer. Follow-ups reuse the
+Gradio conversation state and saved image. Analysis and batch ZIP validation
+remain available in the **Analysis** tab.
+
+For Docker, export only the provider variables you intend to use, then pass
+those variable names at runtime. Do not pass a shared `.env` file or add keys
+to image build arguments:
+
+```bash
+docker build -t deepfake-localizer .
+docker history --no-trunc deepfake-localizer
+mkdir -p artifacts
+docker run --rm -p 7860:7860 -v "$PWD/artifacts:/app/artifacts" \
+  -e OPENROUTER_API_KEY -e GEMINI_API_KEY deepfake-localizer
+```
+
+The agent keeps SQLite long-term investigation memory at
+`artifacts/memory/investigations.db`, keyed by image hash and run configuration.
+Conversation history and the active image path/hash are held in Gradio state.
+Uploaded chat images are saved under `artifacts/uploads`; agent tools and the
+local API reject paths outside that directory. The API should be bound to
+loopback unless protected by its optional `AGENT_API_TOKEN`.
+
+Failures remain visible in the evidence panel. If a provider is unavailable,
+the UI uses the labeled fixed pipeline. Missing/corrupt images fail inspection;
+a missing checkpoint makes localizer calls fail but does not invent a score.
+Rate limits, malformed model tool calls, and exhausted model fallbacks can
+prevent an agent answer. The localizer score is uncalibrated, and neither a
+flagged nor unflagged result proves authenticity or tampering. ELA and the
+localizer are weak on uniformly re-encoded images and do not detect fully
+AI-generated images.
+
+See [INFERENCE.md](INFERENCE.md#agent-chat), [docs/limitations.md](docs/limitations.md#agent-chat-and-deployment-failure-modes),
+[docs/wiring.md](docs/wiring.md), and [docs/deploy_checklist.md](docs/deploy_checklist.md).
+Evaluation details are in [docs/evaluation.md](docs/evaluation.md).
+Email is not implemented; specifically, email delivery is not implemented.
+
+### Agent model comparison
+
+The table below records the Phase 1 one-shot text/tool-calling screen. It is a
+model API compatibility check, not an image accuracy result. The separate
+three-image tool-use smoke is listed after this table.
+
+| Model | Provider | Tool-call probe | Median latency | Configured role |
+|---|---|---:|---:|---|
+| `nvidia/nemotron-3.5-lightning:free` | OpenRouter | 5/5 | 856 ms | Primary |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | OpenRouter | 5/5 | 1,522 ms | Fallback |
+| `gemini-3.6-flash` | Gemini | 5/5 | 2,026 ms | Fallback |
+| `gemini-3.5-flash-lite` | Gemini | 5/5 | 6,792 ms | Fallback |
+
+The underlying measurements, retired candidates, method, and caveats are in
+[docs/model_selection.md](docs/model_selection.md). The three-image smoke was
+not run in this environment because provider variables were unavailable; see
+the results table below.
 
 ### Phase 9 live model smoke results
 

@@ -208,6 +208,33 @@ def test_path_outside_the_upload_root_is_rejected(tmp_path, ctx):
     assert "outside the allowed upload directory" in result["error"]
 
 
+def test_passwd_traversal_and_external_symlink_are_rejected(tmp_path, ctx):
+    passwd = run_tool("inspect_image", {"image_path": "/etc/passwd"}, ctx)
+    assert "error" in passwd
+    assert "hint" in passwd
+    assert "outside the allowed upload directory" in passwd["error"]
+
+    outside = tmp_path.parent / "outside.png"
+    Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(outside)
+    traversal = run_tool(
+        "inspect_image",
+        {"image_path": str(ctx.upload_root / ".." / outside.name)},
+        ctx,
+    )
+    symlink = ctx.upload_root / "outside-link.png"
+    try:
+        symlink.symlink_to(outside)
+        linked = run_tool("inspect_image", {"image_path": str(symlink)}, ctx)
+    finally:
+        symlink.unlink(missing_ok=True)
+        outside.unlink(missing_ok=True)
+
+    for result in (traversal, linked):
+        assert "error" in result
+        assert "hint" in result
+        assert "outside the allowed upload directory" in result["error"]
+
+
 def test_bad_path_is_an_error_dict_not_an_exception(ctx):
     # Empty string, None and a directory must all come back as dicts.
     for bad in ("", None, str(Path("/"))):

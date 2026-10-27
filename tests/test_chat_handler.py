@@ -181,6 +181,7 @@ def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
 
     assert "fixed pipeline (no LLM)" in answer
     assert "Flagged for review" in answer
+    assert "No configured model provider was available." in answer
     assert calls[0]["tool"] == "inspect_image"
     assert calls[0]["source"] == "fixed pipeline (no LLM)"
     assert "### &lt;photo&gt;.png" in answer
