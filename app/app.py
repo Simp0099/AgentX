@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import gradio as gr  # noqa: E402
 
 from agent.batch import process_batch  # noqa: E402
+from app.chat_handler import agent_chat as _agent_chat  # noqa: E402
 from app.handler import analyze as _analyze  # noqa: E402
 
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/best_localizer.keras")
@@ -27,6 +28,11 @@ except Exception as exc:  # noqa: BLE001 - missing checkpoint is shown in UI
 def analyze(image, threshold):
     """Run investigation through the orchestrator and render its record."""
     return _analyze(image, threshold, detector=DETECTOR)
+
+
+def chat(message, image, state):
+    """Route a chat turn through the testable chat handler."""
+    return _agent_chat(message, image, state, detector=DETECTOR)
 
 
 def analyze_uploads(files, threshold, goal, custom_text):
@@ -100,53 +106,86 @@ produce reliable splice signals. Treat output as a signal, not proof.
 """
 
 with gr.Blocks(title="Deepfake Tampering Localizer") as demo:
-    gr.Markdown(DESCRIPTION)
-    if DETECTOR is None:
-        gr.Markdown(f"> No trained checkpoint loaded: `{LOAD_ERROR}`")
-    with gr.Row():
-        with gr.Column():
-            image_input = gr.File(
-                type="filepath",
-                file_count="multiple",
-                file_types=["image"],
-                label="Upload one or more images",
-            )
-            goal = gr.Dropdown(
-                choices=["Quick check", "Detailed", "Custom text"],
-                value="Quick check",
-                label="Investigation goal",
-            )
-            custom_goal = gr.Textbox(label="Custom goal", lines=2, max_lines=4)
-            threshold = gr.Slider(
-                0.1,
-                0.9,
-                value=0.5,
-                step=0.05,
-                label="Decision threshold",
-                info="Lower catches more tampering but raises false alarms.",
-            )
-            run = gr.Button("Analyze", variant="primary")
-        with gr.Column():
-            original_output = gr.Gallery(label="Original images", columns=2, height="auto")
-            overlay_output = gr.Gallery(
-                label="Model-predicted tampered region (ELA-based)", columns=2, height="auto"
-            )
-    with gr.Row():
-        ela_output = gr.Gallery(label="ELA maps (checks actually run)", columns=2, height="auto")
-        detail_output = gr.Markdown()
+    with gr.Tabs():
+        with gr.Tab("Analysis"):
+            gr.Markdown(DESCRIPTION)
+            if DETECTOR is None:
+                gr.Markdown(f"> No trained checkpoint loaded: `{LOAD_ERROR}`")
+            with gr.Row():
+                with gr.Column():
+                    image_input = gr.File(
+                        type="filepath",
+                        file_count="multiple",
+                        file_types=["image"],
+                        label="Upload one or more images",
+                    )
+                    goal = gr.Dropdown(
+                        choices=["Quick check", "Detailed", "Custom text"],
+                        value="Quick check",
+                        label="Investigation goal",
+                    )
+                    custom_goal = gr.Textbox(label="Custom goal", lines=2, max_lines=4)
+                    threshold = gr.Slider(
+                        0.1,
+                        0.9,
+                        value=0.5,
+                        step=0.05,
+                        label="Decision threshold",
+                        info="Lower catches more tampering but raises false alarms.",
+                    )
+                    run = gr.Button("Analyze", variant="primary")
+                with gr.Column():
+                    original_output = gr.Gallery(label="Original images", columns=2, height="auto")
+                    overlay_output = gr.Gallery(
+                        label="Model-predicted tampered region (ELA-based)",
+                        columns=2,
+                        height="auto",
+                    )
+            with gr.Row():
+                ela_output = gr.Gallery(
+                    label="ELA maps (checks actually run)", columns=2, height="auto"
+                )
+                detail_output = gr.Markdown()
 
-    gr.Markdown("## Batch ZIP validation")
-    with gr.Row():
-        batch_input = gr.File(label="Upload an image ZIP", file_types=[".zip"])
-        batch_button = gr.Button("Process batch")
-    batch_output = gr.Textbox(label="Batch result", lines=6, interactive=False)
-    batch_button.click(analyze_batch, inputs=[batch_input], outputs=[batch_output])
+            gr.Markdown("## Batch ZIP validation")
+            with gr.Row():
+                batch_input = gr.File(label="Upload an image ZIP", file_types=[".zip"])
+                batch_button = gr.Button("Process batch")
+            batch_output = gr.Textbox(label="Batch result", lines=6, interactive=False)
+            batch_button.click(analyze_batch, inputs=[batch_input], outputs=[batch_output])
 
-    run.click(
-        analyze_uploads,
-        inputs=[image_input, threshold, goal, custom_goal],
-        outputs=[original_output, ela_output, overlay_output, detail_output],
-    )
+            run.click(
+                analyze_uploads,
+                inputs=[image_input, threshold, goal, custom_goal],
+                outputs=[original_output, ela_output, overlay_output, detail_output],
+            )
+
+        with gr.Tab("Chat"):
+            gr.Markdown(
+                "Ask a question about an image. Follow-up questions can reuse the image above."
+            )
+            chat_state = gr.State(
+                {"history": [], "image_path": None, "image_hash": None, "filename": "image"}
+            )
+            chat_image = gr.Image(type="filepath", label="Image (optional after first turn)")
+            chat_message = gr.Textbox(
+                label="Goal or question", placeholder="Is this edited?", lines=2
+            )
+            chat_submit = gr.Button("Ask", variant="primary")
+            with gr.Row():
+                with gr.Column():
+                    chat_answer = gr.Markdown(label="Answer")
+                    with gr.Accordion("Tool calls and evidence", open=False):
+                        chat_tool_log = gr.JSON(
+                            label="Calls, arguments, status, and result preview"
+                        )
+                with gr.Column():
+                    chat_ela = gr.Image(label="ELA (Error Level Analysis)")
+            chat_submit.click(
+                chat,
+                inputs=[chat_message, chat_image, chat_state],
+                outputs=[chat_answer, chat_tool_log, chat_ela, chat_state],
+            )
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
