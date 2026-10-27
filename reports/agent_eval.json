@@ -1,0 +1,16 @@
+{
+  "model": "nvidia/nemotron-3.5-lightning:free",
+  "date": "2026-10-27",
+  "dataset_type": "synthetic",
+  "dataset_size": 20,
+  "status": "not_run",
+  "reason": "No configured model credential is present.",
+  "verdict_accuracy": null,
+  "average_tool_calls_per_image": null,
+  "uncertain_or_needs_review_cases": null,
+  "failure_count": null,
+  "behavior_checks": {
+    "different_images_different_tool_sequences": "not_run",
+    "later_tool_call_depended_on_prior_result": "not_run"
+  }
+}

@@ -228,6 +228,34 @@ See [docs/wiring.md](docs/wiring.md) for module details and
 [docs/evaluation.md](docs/evaluation.md) for the pre-registered evaluation
 criterion.
 
+### Phase 9 live model smoke results
+
+The real-image agent smoke could not be run in this checkout because none of
+the configured provider credential variables was available. These entries are
+explicitly **not run**, rather than inferred from the earlier one-shot tool
+probe; run `python scripts/smoke_agent.py` when credentials are configured. The
+runner checks authentic, tampered, and corrupt inputs, records tool arguments
+and result sizes, and requires a written plan before its first tool result.
+
+| Candidate model | Tool-calling result | Date |
+|---|---|---|
+| `gemini-2.5-flash` | Not run: `GEMINI_API_KEY` unavailable | 2026-10-27 |
+| `gemini-3.6-flash` | Not run: `GEMINI_API_KEY` unavailable | 2026-10-27 |
+| `gemini-3.5-flash-lite` | Not run: `GEMINI_API_KEY` unavailable | 2026-10-27 |
+| `nvidia/nemotron-3.5-lightning:free` | Not run: `OPENROUTER_API_KEY` unavailable | 2026-10-27 |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | Not run: `OPENROUTER_API_KEY` unavailable | 2026-10-27 |
+| `nvidia/nemotron-3-super-120b-a12b:free` | Not run: `OPENROUTER_API_KEY` unavailable | 2026-10-27 |
+| `inclusionai/ling-3.0-flash-sante:free` | Not run: `OPENROUTER_API_KEY` unavailable | 2026-10-27 |
+| `space-bunny-free` | Not run: `OPENCODE_ZEN_API_KEY` unavailable | 2026-10-27 |
+| `big-pickle` | Not run: `OPENCODE_ZEN_API_KEY` unavailable | 2026-10-27 |
+
+The live behavior checks (different tool sequences for different images and a
+later call reacting to an earlier tool result) are also **not run**. The
+20-image agent benchmark is invoked with `python scripts/benchmark_agent.py`;
+the local CASIA2 copy has no ground-truth masks or declared test split, so the
+runner uses generated images and labels the output `synthetic` in
+`reports/agent_eval.json`.
+
 ## Synthetic data disclaimer
 
 The synthetic-data evaluation in `scripts/evaluate_agent.py` /

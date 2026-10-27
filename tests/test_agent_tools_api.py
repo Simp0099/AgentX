@@ -79,7 +79,9 @@ def test_every_parameters_object_is_a_valid_json_schema():
 
 
 def test_tool_names_match_between_tools_and_schemas():
-    assert sorted(_schema_names()) == sorted(TOOLS)
+    schema_names = _schema_names()
+    assert all(name in TOOLS for name in schema_names)
+    assert sorted(schema_names) == sorted(TOOLS)
     assert len(set(_schema_names())) == len(_schema_names())
 
 
