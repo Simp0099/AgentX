@@ -13,6 +13,7 @@ misconfiguration is a one-line fix rather than a stack trace:
 
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 from typing import Any
@@ -123,6 +124,7 @@ def get_agent_config(
             variable NAME (never its value).
     """
     global _cache
+    load_env()
     source = str(path or _DEFAULT_PATH)
     if _cache is not None and not reload and path is None:
         agent = _cache
@@ -136,10 +138,34 @@ def get_agent_config(
         if path is None:
             _cache = agent
 
-    if require_credentials:
-        _assert_credentials(agent)
+    effective = copy.deepcopy(agent)
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if provider:
+        if provider not in {"anthropic", "openai"}:
+            raise AgentConfigError("LLM_PROVIDER must be 'anthropic' or 'openai'")
+        key_env = "ANTHROPIC_API_KEY" if provider == "anthropic" else "OPENAI_API_KEY"
+        effective.update(
+            provider=provider,
+            model=os.environ.get("LLM_MODEL") or effective["model"],
+            api_key_env=key_env,
+            base_url=os.environ.get(
+                "LLM_BASE_URL", effective.get("provider_base_urls", {}).get(provider, "")
+            ),
+            fallback_models=[],
+        )
+        try:
+            effective["request_timeout_seconds"] = float(
+                os.environ.get("LLM_TIMEOUT_SECONDS", effective["request_timeout_seconds"])
+            )
+        except ValueError as exc:
+            raise AgentConfigError("LLM_TIMEOUT_SECONDS must be a number") from exc
+        if effective["request_timeout_seconds"] <= 0:
+            raise AgentConfigError("LLM_TIMEOUT_SECONDS must be positive")
 
-    return agent
+    if require_credentials:
+        _assert_credentials(effective)
+
+    return effective
 
 
 def _assert_credentials(agent: dict[str, Any]) -> None:

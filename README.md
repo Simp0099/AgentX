@@ -223,11 +223,17 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-For model-driven Chat, make `OPENROUTER_API_KEY` and/or `GEMINI_API_KEY`
-available through your shell or a secrets manager. Do not put their values in
-the repository. OpenRouter is the configured primary; the configured fallback
-models use OpenRouter and Gemini. With no working provider key, Chat runs the
-deterministic pipeline and labels the answer **fixed pipeline (no LLM)**.
+For model-driven Chat, copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`
+and/or `GEMINI_API_KEY`. The app loads `.env` before reading provider settings;
+it never displays or logs key values. `configs/agent.yaml` lists the free models
+in routing order: OpenRouter Nemotron, then the verified Gemini free-tier
+models. A quota or rate-limit response skips that model immediately and routes
+to the next configured free model; transient failures retry twice first. A
+model without a configured key is skipped. OpenCode Zen community models are
+not routed because direct API probes were rejected upstream; their free tier is
+limited to the OpenCode client. `GET /api/health` reports provider availability
+without returning a key. With no usable free-model key, Chat explains the
+missing-key reason and uses the deterministic fixed pipeline.
 
 ```bash
 python app/app.py
@@ -248,7 +254,7 @@ docker build -t deepfake-localizer .
 docker history --no-trunc deepfake-localizer
 mkdir -p artifacts
 docker run --rm -p 7860:7860 -v "$PWD/artifacts:/app/artifacts" \
-  -e OPENROUTER_API_KEY -e GEMINI_API_KEY deepfake-localizer
+  -e LLM_TIMEOUT_SECONDS -e OPENROUTER_API_KEY -e GEMINI_API_KEY deepfake-localizer
 ```
 
 The agent keeps SQLite long-term investigation memory at

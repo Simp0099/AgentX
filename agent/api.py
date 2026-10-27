@@ -43,15 +43,21 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import shutil
+import tempfile
 import threading
 import time
-from pathlib import Path
+import uuid
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent.agent_tools import TOOL_SCHEMAS, TOOLS, ToolContext, run_tool
+from agent.env import load_env
 
 logger = logging.getLogger("agent.api")
 
@@ -74,6 +80,40 @@ def _configure_logging() -> None:
 
 
 _configure_logging()
+load_env()
+
+
+def _llm_availability() -> dict[str, Any]:
+    """Describe LLM configuration without returning credential values."""
+    from agent.agent_config import get_agent_config
+
+    try:
+        config = get_agent_config()
+        provider = str(config["provider"])
+        key_name = str(config["api_key_env"])
+        model = str(config["model"])
+        key_value = os.environ.get(key_name, "").strip()
+        placeholder = key_value.casefold() in {
+            "your_key_here",
+            "replace_me",
+            "changeme",
+            "placeholder",
+        }
+        available = bool(key_value) and not placeholder and bool(model)
+        reason = None if available else f"missing or placeholder {key_name}, or model configuration"
+        return {"available": available, "provider": provider, "model": model, "reason": reason}
+    except Exception as exc:  # configuration details should remain concise
+        return {
+            "available": False,
+            "provider": os.environ.get("LLM_PROVIDER", "configured provider"),
+            "model": None,
+            "reason": f"configuration error: {type(exc).__name__}",
+        }
+
+
+_startup_llm = _llm_availability()
+if not _startup_llm["available"]:
+    logger.warning("language model unavailable at startup: %s", _startup_llm["reason"])
 
 app = FastAPI(
     title="AI Deepfake & Tampering Localizer - agent tools",
@@ -127,6 +167,16 @@ class ChatRequest(_StrictModel):
     message: str = Field(min_length=1, max_length=4000)
     image_path: str = Field(min_length=1)
     history: list[dict[str, Any]] = Field(default_factory=list)
+    threshold: float | None = Field(default=None, ge=0.1, le=0.9)
+
+
+class BatchRequest(_StrictModel):
+    zip_path: str = Field(min_length=1)
+
+
+class ReportRequest(_StrictModel):
+    image_paths: list[str] = Field(min_length=1, max_length=50)
+    threshold: float = Field(default=0.5, ge=0.1, le=0.9)
 
 
 # tool name -> request model. Keeping this explicit means a missing field is a
@@ -248,6 +298,19 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/health")
+def api_health() -> dict[str, Any]:
+    """Report app liveness and whether the configured LLM has a key."""
+    llm = _llm_availability()
+    return {"status": "ok", "llm": llm}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def dashboard() -> FileResponse:
+    """Serve the standalone local dashboard."""
+    return FileResponse(Path(__file__).resolve().parent.parent / "app" / "dashboard.html")
+
+
 @app.get("/tools")
 def list_tools() -> list[dict[str, Any]]:
     """Return the approved tool schemas in OpenAI ``tools`` format."""
@@ -278,8 +341,296 @@ def chat(payload: ChatRequest) -> dict[str, Any]:
             "history": payload.history,
         },
         detector=get_detector(),
+        threshold=payload.threshold,
     )
-    return {key: value for key, value in result.items() if not key.startswith("_")}
+    reply = {key: value for key, value in result.items() if not key.startswith("_")}
+    internal_state = result.get("_state")
+    if isinstance(internal_state, dict):
+        reply["conversation_state"] = {
+            "history": internal_state.get("history", payload.history),
+            "image_path": str(image_path),
+            "filename": image_path.name,
+        }
+    return reply
+
+
+@app.post("/api/upload", dependencies=[Depends(require_token)])
+async def upload_file(
+    request: Request,
+    filename: str = Query(min_length=1, max_length=255),
+) -> dict[str, Any]:
+    """Store one browser upload under the guarded upload root."""
+    suffix = Path(filename).suffix.lower()
+    supported = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".zip"}
+    if suffix not in supported:
+        raise HTTPException(status_code=415, detail="unsupported file type")
+    root = upload_root().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    max_bytes = 50_000_000
+    try:
+        from agent.config import get_config
+
+        max_bytes = int(get_config().get("forensics", {}).get("max_file_bytes", max_bytes))
+    except Exception:
+        pass
+    target = root / f"upload-{uuid.uuid4().hex}{suffix}"
+    total = 0
+    try:
+        with target.open("wb") as handle:
+            async for chunk in request.stream():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413, detail="upload exceeds configured size limit"
+                    )
+                handle.write(chunk)
+        if total == 0:
+            raise HTTPException(status_code=400, detail="upload is empty")
+        if suffix != ".zip":
+            from PIL import Image
+
+            with Image.open(target) as image:
+                image.verify()
+            return {
+                "image_path": str(target.resolve()),
+                "filename": Path(filename).name,
+                "bytes": total,
+            }
+
+        extracted, warnings = _extract_valid_zip_images(target, root)
+        if not extracted:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "archive contains no valid supported images",
+                    "warnings": warnings,
+                },
+            )
+        return {
+            "image_path": str(target.resolve()),
+            "filename": Path(filename).name,
+            "bytes": total,
+            "images": extracted,
+            "warnings": warnings,
+        }
+    except HTTPException:
+        target.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=422, detail=f"invalid upload: {type(exc).__name__}"
+        ) from None
+
+
+_ZIP_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
+_ZIP_MAX_ENTRIES = 2000
+_ZIP_MAX_IMAGES = 100
+_ZIP_MAX_UNCOMPRESSED_BYTES = 250_000_000
+
+
+def _extract_valid_zip_images(
+    archive_path: Path, upload_directory: Path
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Safely extract and validate supported images from an uploaded ZIP."""
+    from PIL import Image
+
+    image_limit = 50_000_000
+    try:
+        from agent.config import get_config
+
+        image_limit = int(get_config().get("forensics", {}).get("max_file_bytes", image_limit))
+    except Exception:
+        pass
+    warnings: list[dict[str, str]] = []
+    extracted: list[dict[str, str]] = []
+    destination_root = Path(tempfile.mkdtemp(prefix="zip-images-", dir=upload_directory)).resolve()
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            infos = archive.infolist()
+            if len(infos) > _ZIP_MAX_ENTRIES:
+                raise HTTPException(status_code=413, detail="archive contains too many entries")
+            declared_candidates = []
+            for info in infos:
+                normalized_name = info.filename.replace("\\", "/")
+                parts = PurePosixPath(normalized_name).parts
+                if (
+                    not info.is_dir()
+                    and Path(normalized_name).suffix.lower() in _ZIP_IMAGE_EXTENSIONS
+                    and not any(part.startswith(".") or part == "__MACOSX" for part in parts)
+                ):
+                    declared_candidates.append(info)
+            if len(declared_candidates) > _ZIP_MAX_IMAGES:
+                raise HTTPException(status_code=413, detail="archive contains too many images")
+            declared_total = sum(info.file_size for info in declared_candidates)
+            if declared_total > _ZIP_MAX_UNCOMPRESSED_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="archive uncompressed image data is too large",
+                )
+            total_written = 0
+            for info in infos:
+                filename = info.filename
+                normalized = filename.replace("\\", "/")
+                parts = PurePosixPath(normalized).parts
+                if info.is_dir() or not parts:
+                    continue
+                if any(part == "__MACOSX" or part.startswith(".") for part in parts):
+                    continue
+                extension = Path(normalized).suffix.lower()
+                if extension not in _ZIP_IMAGE_EXTENSIONS:
+                    warnings.append(
+                        {"filename": filename, "warning": "unsupported or non-image file skipped"}
+                    )
+                    continue
+                if ".." in parts:
+                    warnings.append(
+                        {"filename": filename, "warning": "unsafe archive path skipped"}
+                    )
+                    continue
+                if info.file_size > image_limit:
+                    warnings.append(
+                        {
+                            "filename": filename,
+                            "warning": "file exceeds configured image size limit",
+                        }
+                    )
+                    continue
+                target = (destination_root.joinpath(*parts)).resolve()
+                try:
+                    target.relative_to(destination_root)
+                except ValueError:
+                    warnings.append(
+                        {"filename": filename, "warning": "unsafe archive path skipped"}
+                    )
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                written = 0
+                try:
+                    with archive.open(info) as source, target.open("wb") as output:
+                        while chunk := source.read(1024 * 1024):
+                            written += len(chunk)
+                            total_written += len(chunk)
+                            if written > image_limit:
+                                raise ValueError("file exceeds configured image size limit")
+                            if total_written > _ZIP_MAX_UNCOMPRESSED_BYTES:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail="archive uncompressed image data is too large",
+                                )
+                            output.write(chunk)
+                    with Image.open(target) as image:
+                        image.verify()
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    target.unlink(missing_ok=True)
+                    warnings.append(
+                        {
+                            "filename": filename,
+                            "warning": f"invalid image skipped ({type(exc).__name__})",
+                        }
+                    )
+                    continue
+                extracted.append({"filename": filename, "image_path": str(target)})
+        if not extracted:
+            shutil.rmtree(destination_root, ignore_errors=True)
+        return extracted, warnings
+    except HTTPException:
+        shutil.rmtree(destination_root, ignore_errors=True)
+        raise
+    except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+        shutil.rmtree(destination_root, ignore_errors=True)
+        raise HTTPException(
+            status_code=422,
+            detail=f"invalid ZIP archive ({type(exc).__name__})",
+        ) from None
+
+
+@app.get("/api/assets", dependencies=[Depends(require_token)])
+def asset(path: str = Query(min_length=1)) -> FileResponse:
+    """Serve only uploaded images, ELA maps, batch exports and reports."""
+    candidate = Path(path).expanduser().resolve()
+    roots = [upload_root().resolve(), (Path.cwd() / "artifacts" / "ela").resolve()]
+    try:
+        from agent.config import get_config
+
+        config = get_config().get("forensics", {})
+        for key in ("ela_temp_dir", "report_asset_roots"):
+            configured = config.get(key, [])
+            if isinstance(configured, str):
+                configured = [configured]
+            roots.extend(Path(item).expanduser().resolve() for item in configured)
+        roots.extend(
+            (Path.cwd() / "artifacts" / folder).resolve()
+            for folder in ("batch", "reports")
+        )
+    except Exception:
+        pass
+    if not candidate.is_file() or not any(candidate.is_relative_to(root) for root in roots):
+        raise HTTPException(status_code=404, detail="asset not found")
+    return FileResponse(candidate)
+
+
+@app.post("/api/batch", dependencies=[Depends(require_token)])
+def analyze_batch(payload: BatchRequest) -> dict[str, Any]:
+    """Run the existing bounded ZIP batch pipeline."""
+    archive = Path(payload.zip_path).expanduser().resolve()
+    try:
+        archive.relative_to(upload_root().resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="zip_path is outside the upload directory"
+        ) from None
+    if archive.suffix.lower() != ".zip" or not archive.is_file():
+        raise HTTPException(status_code=404, detail="ZIP upload not found")
+    from agent.batch import process_batch
+
+    result = process_batch(str(archive), "artifacts/batch", detector=get_detector())
+    safe_results = [
+        {key: value for key, value in item.items() if key != "record"}
+        for item in result["results"]
+    ]
+    return {**result, "results": safe_results}
+
+
+@app.post("/api/report", dependencies=[Depends(require_token)])
+def export_report(payload: ReportRequest) -> dict[str, str]:
+    """Generate a PDF report from fresh recorded tool results."""
+    upload_root_path = upload_root().resolve()
+    paths = []
+    for item in payload.image_paths:
+        candidate = Path(item).expanduser().resolve()
+        try:
+            candidate.relative_to(upload_root_path)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="image_path is outside the upload directory"
+            ) from None
+        if not candidate.is_file():
+            raise HTTPException(status_code=404, detail="image_path does not exist")
+        paths.append(candidate)
+
+    from agent.orchestrator import run_investigation
+    from agent.reporting import generate_batch_pdf, generate_pdf
+
+    records = [
+        run_investigation(
+            str(path),
+            goal="quick_check",
+            config={"threshold": payload.threshold},
+            planner=False,
+            detector=get_detector(),
+        )
+        for path in paths
+    ]
+    report_dir = Path.cwd() / "artifacts" / "reports"
+    report_path = report_dir / f"deepfake-localizer-{uuid.uuid4().hex}.pdf"
+    if len(records) == 1:
+        generate_pdf(records[0], report_path)
+    else:
+        generate_batch_pdf(records, report_path)
+    return {"report_path": str(report_path.resolve())}
 
 
 def _run_and_log(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:

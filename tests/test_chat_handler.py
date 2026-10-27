@@ -171,9 +171,11 @@ def test_followup_reuses_history_and_needs_no_new_image(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     original_run = loop.run_agent_full
     seen_histories = []
+    seen_paths = []
 
     def run_with_fake(goal, image_path, history=None, **kwargs):
         seen_histories.append(list(history or []))
+        seen_paths.append(str(image_path))
         if not history:
             responses = [
                 make_message(
@@ -207,11 +209,13 @@ def test_followup_reuses_history_and_needs_no_new_image(tmp_path, monkeypatch):
     assert any(item["role"] == "tool" for item in seen_histories[1])
     assert len(calls) == 1
     assert calls[0]["tool"] == "inspect_image"
+    assert len(seen_paths) == 2
+    assert Path(state["image_path"]).is_file()
     assert next_state["image_path"] == state["image_path"]
     assert next_state["image_hash"] == state["image_hash"]
 
 
-def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
+def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch, caplog):
     uploads = _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(
         chat_handler,
@@ -222,6 +226,7 @@ def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
             record=_record("temporary.png"),
             steps=0,
             stopped_reason="model_unavailable",
+            errors=["RuntimeError: environment variable OPENAI_API_KEY is not set"],
         ),
     )
     monkeypatch.setattr(
@@ -239,6 +244,8 @@ def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
     assert "Flagged for review" in result["answer_text"]
     assert "(no LLM)" not in result["answer_text"]
     assert "fixed pipeline (no LLM)" not in result["answer_text"]
+    assert "Language model unavailable (missing provider API key)" in result["answer_text"]
+    assert "model chat unavailable: missing provider API key" in caplog.text
     calls = result["tool_log"]
     assert calls[0]["tool"] == "inspect_image"
     assert calls[0]["source"] == "fixed pipeline"

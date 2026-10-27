@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Analyze images for manipulation signals and inspect evidence with Deepfake Localizer.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 44'%3E%3Cpath fill='%232868e7' d='M20 2 36 8v12c0 10-6.7 17.2-16 22C10.7 37.2 4 30 4 20V8z'/%3E%3Cpath fill='none' stroke='white' stroke-width='3' d='m12 21 5 5 11-12'/%3E%3C/svg%3E">
+  <title>Deepfake Localizer</title>
+  <style>
+    html { font-size: clamp(0.875rem, 0.9vw + 0.625rem, 1rem); }
+    :root {
+      color-scheme: light;
+      --page: #e7edf8;
+      --page-glow: #f7faff;
+      --panel: rgba(250, 252, 255, .82);
+      --panel-solid: #f7faff;
+      --panel-raised: rgba(255, 255, 255, .68);
+      --panel-soft: #f3f7ff;
+      --panel-inset: rgba(222, 231, 247, .72);
+      --line: rgba(111, 137, 184, .24);
+      --line-strong: rgba(94, 126, 183, .38);
+      --border-strong: rgba(94, 126, 183, .5);
+      --result-surface: #fff;
+      --text: #13264e;
+      --muted: #496188;
+      --subtle: #586f93;
+      --blue: #2868e7;
+      --blue-selected: #1c4fa8;
+      --blue-strong: #1760ed;
+      --blue-soft: #d9e6ff;
+      --blue-glow: rgba(48, 109, 236, .22);
+      --amber: #8a5700;
+      --amber-bg: #fff0cb;
+      --green: #13764d;
+      --green-bg: #d8f5e7;
+      --red: #d72e36;
+      --badge-tampered-text: #9f1c14;
+      --badge-tampered-bg: #fee2dc;
+      --badge-authentic-text: #126342;
+      --badge-authentic-bg: #d8f5e7;
+      --purple: #6847d5;
+      --shadow: 0 0.9375rem 2.125rem rgba(49, 75, 125, .13), 0 0.1875rem 0.5rem rgba(49, 75, 125, .08);
+      --shadow-soft: 0 0.4375rem 1.125rem rgba(49, 75, 125, .10);
+      --radius: 1.125rem;
+      --radius-sm: 0.75rem;
+    }
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --page: #071326;
+      --page-glow: #0e1c31;
+      --panel: rgba(15, 31, 53, .94);
+      --panel-solid: #102039;
+      --panel-raised: rgba(19, 39, 66, .82);
+      --panel-soft: #0d1a2c;
+      --panel-inset: rgba(7, 19, 37, .72);
+      --line: rgba(101, 139, 194, .24);
+      --line-strong: rgba(108, 158, 230, .42);
+      --border-strong: rgba(135, 177, 236, .62);
+      --result-surface: #142844;
+      --text: #f1f6ff;
+      --muted: #c1d3ef;
+      --subtle: #a8bfdf;
+      --blue: #71a9ff;
+      --blue-selected: #b1cfff;
+      --blue-strong: #1674ff;
+      --blue-soft: #123a70;
+      --blue-glow: rgba(30, 111, 245, .30);
+      --amber: #ffc15d;
+      --amber-bg: rgba(150, 94, 0, .28);
+      --green: #63e0a1;
+      --green-bg: rgba(16, 124, 74, .23);
+      --red: #ff4b52;
+      --badge-tampered-text: #ffc0b8;
+      --badge-tampered-bg: #5c211d;
+      --badge-authentic-text: #9cf0c3;
+      --badge-authentic-bg: #123f30;
+      --purple: #b7a2ff;
+      --shadow: 0 1rem 2.375rem rgba(0, 0, 0, .30), 0 0.1875rem 0.5625rem rgba(0, 0, 0, .18);
+      --shadow-soft: 0 0.5rem 1.25rem rgba(0, 0, 0, .22);
+    }
+    [data-theme="light"] { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      min-width: 20rem;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(ellipse at 8% 0%, var(--page-glow), transparent 40%),
+        radial-gradient(ellipse at 88% 14%, rgba(96, 143, 232, .12), transparent 34%),
+        var(--page);
+      font: 100%/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -.01em;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    :focus-visible { outline: 0.1875rem solid var(--blue); outline-offset: 0.125rem; }
+    ::placeholder { color: var(--muted); opacity: 1; }
+    .app-shell { width: 100%; max-width: 75rem; min-height: 100vh; margin: 0 auto; padding: 1rem; }
+    .topbar {
+      height: 3.875rem;
+      display: grid;
+      grid-template-columns: minmax(16.875rem, 1fr) auto minmax(7.5rem, 1fr);
+      align-items: center;
+      gap: 1.25rem;
+      padding: 0 1.0625rem 0 1.375rem;
+      border: 0.0625rem solid var(--line);
+      border-radius: 1.75rem;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(1.25rem);
+      position: relative;
+      z-index: 2;
+    }
+    .brand { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+    .brand-mark { width: 2.25rem; height: 2.5rem; color: var(--blue); filter: drop-shadow(0 0.1875rem 0.3125rem var(--blue-glow)); flex: 0 0 auto; }
+    .brand-name { font-size: 1.5rem; font-weight: 760; letter-spacing: -.045em; }
+    .brand-divider { height: 1.75rem; width: 0.0625rem; background: var(--line-strong); margin: 0 0.5rem; }
+    .brand-product { color: var(--muted); font-size: 0.8125rem; white-space: nowrap; }
+    .top-tabs { display: flex; align-items: center; padding: 0.25rem; border: 0.0625rem solid var(--line); border-radius: 62.4375rem; background: var(--panel-inset); }
+    .top-tab { display: inline-flex; align-items: center; justify-content: center; gap: 0.5625rem; min-height: 2.375rem; padding: 0 1.25rem; border: 0; border-radius: 62.4375rem; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
+    .top-tab svg { width: 1.0625rem; height: 1.0625rem; }
+    .top-tab[aria-selected="true"] { color: #fff; background: linear-gradient(135deg, #4e8cff, #2162e8); box-shadow: 0 0.3125rem 0.8125rem var(--blue-glow); }
+    [data-theme="light"] .top-tab[aria-selected="true"] { color: #14346d; background: linear-gradient(135deg, #dce8ff, #bfd3ff); }
+    .top-actions { display: flex; justify-content: flex-end; align-items: center; gap: 0.625rem; }
+    .icon-button { width: 2.625rem; height: 2.625rem; display: inline-grid; place-items: center; border: 0.0625rem solid var(--line); border-radius: 50%; background: var(--panel-raised); box-shadow: var(--shadow-soft); cursor: pointer; }
+    .icon-button:hover, .top-tab:hover:not([aria-selected="true"]) { border-color: var(--line-strong); color: var(--blue); }
+    .icon-button svg { width: 1.25rem; height: 1.25rem; }
+    .layout { display: block; margin-top: 1rem; min-height: calc(100vh - 6.75rem); }
+    .online-dot, .ready-dot { width: 0.5625rem; height: 0.5625rem; display: inline-block; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0.1875rem var(--green-bg); }
+    .main-grid { display: grid; grid-template-columns: minmax(21.875rem, 34%) minmax(0, 1fr); align-items: start; gap: 1.25rem; min-width: 0; }
+    .left-column, .right-column { min-width: 0; }
+    .page-heading { margin: 1.0625rem 0 0.9375rem; }
+    .page-heading h1 { margin: 0; font-size: clamp(1.375rem, 2vw, 1.75rem); line-height: 1.15; letter-spacing: -.04em; }
+    .page-heading p { margin: 0.375rem 0 0; color: var(--muted); font-size: 0.8125rem; }
+    .panel { border: 0.0625rem solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow-soft); backdrop-filter: blur(0.875rem); }
+    .upload-panel { padding: 1.0625rem; }
+    .panel-title { display: flex; align-items: center; gap: 0.625rem; margin: 0 0 0.8125rem; font-size: 0.9375rem; font-weight: 700; }
+    .panel-title svg { width: 1.25rem; height: 1.25rem; color: var(--blue); }
+    .drop-zone { min-height: 8.25rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; padding: 1rem; border: 0.0625rem dashed var(--line-strong); border-radius: 0.9375rem; background: var(--panel-raised); text-align: center; cursor: pointer; transition: border-color .16s, background .16s, transform .16s; }
+    .drop-zone:hover, .drop-zone.dragging { border-color: var(--blue); background: var(--blue-soft); transform: translateY(-0.0625rem); }
+    .drop-zone svg { width: 2.3125rem; height: 2.3125rem; color: var(--blue); margin-bottom: 0.125rem; }
+    .drop-main { font-weight: 660; }
+    .drop-support { color: var(--muted); font-size: 0.6875rem; }
+    .visually-hidden { position: absolute; width: 0.0625rem; height: 0.0625rem; padding: 0; margin: -0.0625rem; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    .file-list { margin-top: 0.8125rem; overflow: hidden; border: 0.0625rem solid var(--line); border-radius: 0.8125rem; background: var(--panel-raised); }
+    .file-list-head { display: flex; align-items: center; justify-content: space-between; padding: 0.5625rem 0.6875rem; color: var(--muted); font-size: 0.6875rem; border-bottom: 0.0625rem solid var(--line); }
+    .text-button { padding: 0.1875rem 0.3125rem; border: 0; background: none; color: var(--blue); font-size: 0.6875rem; cursor: pointer; }
+    .file-row { min-height: 3.5rem; display: grid; grid-template-columns: 2.625rem minmax(0, 1fr) auto 1.5625rem; align-items: center; gap: 0.5625rem; padding: 0.4375rem 0.5625rem; border-bottom: 0.0625rem solid var(--line); }
+    .file-row:last-child { border-bottom: 0; }
+    .file-thumb { width: 2.625rem; height: 2.5rem; overflow: hidden; border: 0.0625rem solid var(--line); border-radius: 0.5rem; background: var(--panel-inset); object-fit: cover; }
+    .file-icon { display: grid; place-items: center; color: var(--blue); }
+    .file-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .file-name { overflow: hidden; color: var(--text); font-size: 0.6875rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .file-meta { margin-top: 0.125rem; color: var(--subtle); font-size: 0.625rem; }
+    .ready-status { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--green); font-size: 0.625rem; white-space: nowrap; }
+    .ready-dot { width: 0.5rem; height: 0.5rem; }
+    .remove-file { width: 1.5rem; height: 1.5rem; border: 0; border-radius: 50%; background: transparent; color: var(--subtle); cursor: pointer; }
+    .remove-file:hover { color: var(--red); background: var(--panel-inset); }
+    .settings-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 1rem; background: rgba(3, 12, 25, .62); }
+    .settings-overlay[hidden] { display: none; }
+    .settings-panel { width: min(100%, 38rem); max-height: min(90vh, 52rem); overflow: auto; padding: 1.25rem; border: 0.0625rem solid var(--border-strong); background: var(--panel-solid); box-shadow: var(--shadow); }
+    .settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .settings-heading .panel-title { margin: 0; }
+    .field { display: block; margin-top: 0.875rem; }
+    .field-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.375rem; color: var(--muted); font-size: 0.6875rem; font-weight: 600; }
+    .control { width: 100%; min-height: 2.5rem; padding: 0.5625rem 0.75rem; border: 0.0625rem solid var(--line); border-radius: 0.6875rem; outline: none; color: var(--text); background: var(--panel-raised); }
+    .control:focus { border-color: var(--blue); box-shadow: 0 0 0 0.1875rem var(--blue-glow); }
+    select.control { cursor: pointer; }
+    textarea.control { min-height: 3.8125rem; resize: vertical; }
+    .char-count { display: flex; justify-content: flex-end; margin-top: 0.125rem; color: var(--subtle); font-size: 0.625rem; }
+    .threshold-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+    .threshold-note { color: var(--muted); font-size: 0.625rem; }
+    .threshold-number { width: 4.625rem; min-height: 2.125rem; padding: 0.3125rem 0.4375rem; border: 0.0625rem solid var(--line); border-radius: 0.5625rem; background: var(--panel-raised); color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
+    .range-row { display: grid; grid-template-columns: 1.5rem 1fr 1.5rem; align-items: center; gap: 0.5rem; margin-top: 0.25rem; color: var(--subtle); font-size: 0.625rem; }
+    input[type="range"] { width: 100%; height: 0.3125rem; border-radius: 6.1875rem; accent-color: var(--blue-strong); cursor: pointer; }
+    .primary-button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: 0.5625rem; padding: 0 1.125rem; border: 0.0625rem solid rgba(255,255,255,.16); border-radius: 0.8125rem; color: #fff; background: linear-gradient(110deg, #3988ff, #2362e9); box-shadow: 0 0.4375rem 0.9375rem var(--blue-glow); font-weight: 700; cursor: pointer; }
+    .primary-button:hover { filter: brightness(1.07); transform: translateY(-0.0625rem); }
+    .primary-button:disabled { cursor: wait; opacity: .7; transform: none; }
+    .analyze-button { width: 100%; margin-top: 0.9375rem; border-radius: 62.4375rem; }
+    .small-icon { width: 1.0625rem; height: 1.0625rem; }
+    .right-column { padding-top: 1.6875rem; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.625rem; padding: 0.4375rem; }
+    .stat-card { min-height: 4.875rem; display: flex; align-items: center; gap: 0.8125rem; padding: 0.75rem 0.9375rem; border: 0.0625rem solid var(--line); border-radius: 0.9375rem; background: var(--panel-raised); }
+    .stat-icon { width: 2.6875rem; height: 2.6875rem; display: grid; place-items: center; flex: 0 0 auto; border: 0.0625rem solid var(--line); border-radius: 50%; color: var(--blue); background: var(--panel-solid); box-shadow: var(--shadow-soft); }
+    .stat-icon svg { width: 1.3125rem; height: 1.3125rem; }
+    .stat-icon.warning { color: var(--amber); }
+    .stat-icon.error { color: var(--purple); }
+    .stat-value { font-size: 1.4375rem; line-height: 1.1; font-weight: 760; font-variant-numeric: tabular-nums; }
+    .stat-label { margin-top: 0.25rem; color: var(--muted); font-size: 0.625rem; }
+    .stat-card.flagged .stat-value { color: var(--amber); }
+    .results-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 0.8125rem; }
+    .result-card { min-width: 0; padding: 0.8125rem; border: 0.0625rem solid var(--border-strong); background: var(--result-surface); box-shadow: var(--shadow); }
+    .result-title { overflow: hidden; margin: 0 0 0.6875rem; font-size: 0.75rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .image-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+    .image-frame { position: relative; min-width: 0; overflow: hidden; border: 0.0625rem solid var(--line); border-radius: 0.5625rem; background: var(--panel-inset); aspect-ratio: 1.55 / 1; }
+    .image-frame img, .image-frame canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .image-label { margin-top: 0.25rem; color: var(--muted); font-size: 0.5625rem; }
+    .findings { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1fr); gap: 0.6875rem; margin-top: 0.625rem; padding: 0.625rem; border: 0.0625rem solid var(--line); border-radius: 0.75rem; background: var(--panel-raised); }
+    .finding-main { min-width: 0; }
+    .finding-heading { margin-bottom: 0.4375rem; font-size: 0.75rem; font-weight: 700; }
+    .badge { display: inline-flex; align-items: center; min-height: 1.4375rem; padding: 0.1875rem 0.5625rem; border: 0.0625rem solid transparent; border-radius: 62.4375rem; font-size: 0.5625rem; font-weight: 700; }
+    .badge.flagged { color: var(--badge-tampered-text); border-color: color-mix(in srgb, var(--badge-tampered-text) 35%, transparent); background: var(--badge-tampered-bg); }
+    .badge.ready { color: var(--badge-authentic-text); background: var(--badge-authentic-bg); }
+    .badge.authentic { color: var(--badge-authentic-text); border-color: color-mix(in srgb, var(--badge-authentic-text) 35%, transparent); background: var(--badge-authentic-bg); }
+    .badge.neutral { color: var(--muted); background: var(--panel-inset); }
+    .score-label { margin-top: 0.625rem; color: var(--muted); font-size: 0.5625rem; }
+    .score-value { margin-top: 0.0625rem; font-size: 1.5rem; line-height: 1.1; font-weight: 760; font-variant-numeric: tabular-nums; }
+    .checks { min-width: 0; padding-left: 0.6875rem; border-left: 0.0625rem solid var(--line); }
+    .checks-title { margin-bottom: 0.3125rem; color: var(--muted); font-size: 0.5625rem; font-weight: 650; }
+    .check-list { display: grid; gap: 0.25rem; margin: 0; padding: 0; list-style: none; }
+    .check-item { display: flex; align-items: flex-start; gap: 0.3125rem; color: var(--muted); font-size: 0.5625rem; line-height: 1.3; }
+    .check-mark { flex: 0 0 auto; color: var(--green); font-weight: 800; }
+    .check-mark.failed { color: var(--red); }
+    .empty-state { grid-column: 1 / -1; min-height: 11.875rem; display: grid; place-items: center; padding: 1.5rem; color: var(--muted); text-align: center; }
+    .empty-state svg { width: 1.9375rem; height: 1.9375rem; margin-bottom: 0.5rem; color: var(--subtle); }
+    .evidence-panel { margin-top: 0.75rem; padding: 0.8125rem; }
+    .evidence-grid { display: flex; flex-wrap: wrap; gap: 0.625rem; }
+    .evidence-item { flex: 1 1 20rem; min-width: 0; min-height: 0; padding: 0.5rem; border: 0.0625rem solid var(--line); border-radius: 0.75rem; background: var(--panel-raised); }
+    .evidence-image-wrap { max-height: 60vh; min-height: 0; overflow: auto; border: 0.0625rem solid var(--line); border-radius: 0.5rem; background: var(--panel-inset); }
+    .evidence-item img { display: block; width: 100%; height: auto; object-fit: contain; }
+    .evidence-caption { overflow: hidden; margin-top: 0.3125rem; color: var(--muted); font-size: 0.5625rem; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+    .ask-panel { margin-top: 0.75rem; padding: 0.75rem 0.875rem 0.625rem; }
+    .ask-row { display: flex; align-items: end; gap: 0.5625rem; }
+    .ask-row .control { min-height: 3.625rem; resize: vertical; }
+    .send-button { width: 2.4375rem; height: 2.4375rem; display: grid; place-items: center; flex: 0 0 auto; border: 0.0625rem solid var(--line); border-radius: 50%; color: var(--blue); background: var(--panel-raised); cursor: pointer; }
+    .send-button svg { width: 1.125rem; height: 1.125rem; }
+    .chat-response { display: grid; gap: 0.75rem; margin: 0.625rem 0.125rem 0; color: var(--text); font-size: 0.75rem; white-space: pre-wrap; }
+    .chat-response:empty { display: none; }
+    .chat-turn { display: grid; gap: 0.5rem; }
+    .chat-question-bubble, .chat-error, .chat-loading { border: 0.0625rem solid var(--line); border-radius: 0.625rem; padding: 0.625rem 0.75rem; background: var(--panel-soft); }
+    .chat-question-bubble { justify-self: end; max-width: 90%; white-space: pre-wrap; }
+    .chat-error { color: var(--red); white-space: pre-wrap; }
+    .chat-loading { color: var(--muted); }
+    .tools-disclosure { border: 0.0625rem solid var(--line); border-radius: 0.5625rem; padding: 0.5rem 0.625rem; background: var(--panel-soft); }
+    .tools-disclosure summary { color: var(--muted); cursor: pointer; font-weight: 650; }
+    .tools-disclosure ul { margin: 0.5rem 0 0; padding-left: 1.25rem; color: var(--muted); }
+    .fixed-pipeline-notice { margin: 0.5rem 0; border-left: 0.1875rem solid var(--amber); padding: 0.5rem 0.625rem; color: var(--text); background: var(--panel-soft); }
+    .reply-card { padding: 0.6875rem; border-radius: 0.75rem; background: var(--panel-raised); }
+    .reply-card h3 { margin: 0 0 0.5rem; font-size: 0.875rem; }
+    .reply-card table { width: 100%; border-collapse: collapse; font-size: 0.625rem; }
+    .reply-card th, .reply-card td { padding: 0.3125rem 0.4375rem; border-bottom: 0.0625rem solid var(--line); text-align: left; }
+    .reply-card th { width: 46%; color: var(--muted); font-weight: 600; }
+    .reply-card blockquote { white-space: normal; }
+    .reply-prose { margin: 0.5625rem 0.0625rem 0; white-space: pre-wrap; }
+    .actions-row { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+    .secondary-button { min-height: 2.125rem; display: inline-flex; align-items: center; gap: 0.4375rem; padding: 0 0.75rem; border: 0.0625rem solid var(--line-strong); border-radius: 62.4375rem; color: var(--muted); background: var(--panel-raised); font-size: 0.625rem; cursor: pointer; }
+    .secondary-button:hover { border-color: var(--blue); color: var(--blue); }
+    .secondary-button.primary { color: #fff; border-color: transparent; background: linear-gradient(110deg, #3988ff, #2362e9); }
+    .batch-panel, .reports-panel { display: none; margin-top: 0.75rem; padding: 0.9375rem; }
+    .batch-panel.visible, .reports-panel.visible { display: block; }
+    .batch-results, .report-list { display: grid; gap: 0.4375rem; margin-top: 0.625rem; }
+    .batch-result, .report-row { display: flex; justify-content: space-between; gap: 0.625rem; padding: 0.5625rem 0.625rem; border: 0.0625rem solid var(--line); border-radius: 0.625rem; background: var(--panel-raised); font-size: 0.6875rem; }
+    .batch-result .status { color: var(--green); }
+    .notice { min-height: 1.0625rem; margin-top: 0.4375rem; color: var(--muted); font-size: 0.6875rem; }
+    .error-text { color: var(--red); }
+    .hidden { display: none !important; }
+    blockquote { margin: 0.625rem 0; padding: 0.5rem 0.625rem; border-left: 0.1875rem solid var(--blue); border-radius: 0 0.5rem 0.5rem 0; color: var(--muted); background: var(--panel-raised); font-size: 0.625rem; }
+    @media (min-width: 48rem) {
+      .main-grid { grid-template-columns: minmax(19rem, 34%) minmax(0, 1fr); gap: 1.25rem; }
+    }
+    @media (min-width: 80rem) {
+      .main-grid { grid-template-columns: minmax(22rem, 34%) minmax(0, 1fr); }
+    }
+    @media (max-width: 63.999rem) {
+      .topbar { grid-template-columns: minmax(0, 1fr) auto; height: auto; min-height: 3.75rem; padding: .5rem .75rem; }
+      .top-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
+      .top-actions { grid-column: 2; grid-row: 1; }
+    }
+    @media (max-width: 47.999rem) {
+      .app-shell { padding: .75rem; }
+      .topbar { grid-template-columns: 1fr auto; height: auto; min-height: 3.75rem; padding: .5rem .75rem; }
+      .top-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; justify-content: center; }
+      .top-actions { grid-column: 2; grid-row: 1; }
+      .main-grid { grid-template-columns: 1fr; }
+      .main-grid, .evidence-grid { flex-direction: column; }
+      .right-column { padding-top: 0; }
+      .page-heading { margin-top: .25rem; }
+    }
+    @media (max-width: 36.25rem) {
+      .brand-name { font-size: 1.125rem; }
+      .brand-product { display: none; }
+      .brand-divider { display: none; }
+      .brand-mark { width: 1.875rem; height: 2.125rem; }
+      .top-tab { min-height: 2.125rem; gap: .3125rem; padding: 0 .5rem; font-size: .625rem; }
+      .top-tab svg { width: .875rem; height: .875rem; }
+      .icon-button { width: 2.25rem; height: 2.25rem; }
+      .results-grid { grid-template-columns: 1fr; }
+      .stats { gap: 0.3125rem; padding: 0.3125rem; }
+      .stat-card { min-height: 4.1875rem; gap: .4375rem; padding: .5rem; }
+      .stat-icon { width: 2rem; height: 2rem; }
+      .stat-icon svg { width: 1.0625rem; height: 1.0625rem; }
+      .stat-value { font-size: 1.1875rem; }
+      .stat-label { font-size: .5625rem; }
+      .actions-row { flex-wrap: wrap; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+    @media print {
+      body { background: #fff; color: #13264e; }
+      .app-shell { padding: 0; }
+      .topbar, .left-column, .ask-panel, .batch-panel, .reports-panel, .actions-row { display: none !important; }
+      .layout, .main-grid { display: block; margin: 0; }
+      .right-column { padding: 0; }
+      .panel, .result-card { box-shadow: none; break-inside: avoid; background: white; }
+      .results-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Deepfake Localizer">
+        <svg class="brand-mark" viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="M20 2 36 8v12c0 10-6.7 17.2-16 22C10.7 37.2 4 30 4 20V8l16-6Z" fill="currentColor" opacity=".16"/><path d="M20 4 34 9v11c0 8.7-5.7 15.4-14 20-8.3-4.6-14-11.3-14-20V9l14-5Z" stroke="currentColor" stroke-width="2.5"/><path d="m12.5 21 5 5 10-11" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="brand-name">Deepfake Localizer</span>
+      </div>
+      <nav class="top-tabs" aria-label="Workspace views">
+        <button class="top-tab" data-view="overview" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1V10Z"/></svg>Overview</button>
+        <button class="top-tab" data-view="batch" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 5V3h8v2M8 10h8m-8 4h5"/></svg>Batch analysis</button>
+        <button class="top-tab" data-view="reports" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5m-9 4h5m-5 4h5"/></svg>Reports</button>
+      </nav>
+      <div class="top-actions">
+        <button class="icon-button" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme"><svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg></button>
+        <button class="icon-button" id="settings-open" title="Analysis settings" aria-label="Open analysis settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="m19 13.5 1.5 1.2-1.5 2.6-1.9-.6a8 8 0 0 1-1.8 1.1L15 20h-3l-.4-2.2a8 8 0 0 1-1.8-1.1l-1.9.6-1.5-2.6L8 13.5a8 8 0 0 1 0-2L6.4 10.3l1.5-2.6 1.9.6 1.8-1.1L12 5h3l.4 2.2a8 8 0 0 1 1.8 1.1l1.9-.6 1.5 2.6-1.6 1.2a8 8 0 0 1 0 2Z" transform="translate(-1 -1)"/></svg></button>
+        <button class="icon-button" id="profile-button" title="Local profile / API access" aria-label="Profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4 3.4-6 8-6s7.3 2 8 6"/></svg></button>
+      </div>
+    </header>
+
+    <div class="layout">
+<main class="main-grid" id="overview">
+        <section class="left-column">
+          <div class="page-heading"><h1>Media authenticity analysis</h1><p>Detect suspicious edits and inspect likely tampered regions.</p></div>
+          <section class="panel upload-panel" id="upload" aria-labelledby="upload-title">
+            <h2 class="panel-title" id="upload-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4m-5 5 5-5 5 5"/><path d="M5 14a4 4 0 0 0 0 8h14a4 4 0 0 0 0-8"/></svg>Upload media</h2>
+            <label class="drop-zone" id="drop-zone" for="file-input" tabindex="0"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 27V8m-7 7 7-7 7 7"/><path d="M8 25a8 8 0 0 0 0 14h24a8 8 0 0 0 0-14" transform="translate(0 -4)"/></svg><span class="drop-main">Drop images or a ZIP here</span><span class="drop-support">Supports JPG, PNG, WEBP, BMP, TIFF, ZIP</span></label>
+            <input id="file-input" class="visually-hidden" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.zip" multiple>
+            <div class="file-list" id="file-list"><div class="file-list-head"><span id="file-count">0 files uploaded</span><button class="text-button" id="clear-files" type="button">Clear all</button></div><div id="file-rows"></div></div>
+            <div class="notice" id="upload-notice" aria-live="polite"></div>
+          </section>
+
+          <button class="primary-button analyze-button" id="analyze-button" type="button"><svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6m0 6v6M3 12h6m6 0h6M6 6l4 4m4 4 4 4m0-12-4 4m-4 4-4 4"/></svg>Analyze media</button>
+          <div class="settings-overlay" id="settings-overlay" hidden>
+            <section class="panel settings-panel" id="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabindex="-1">
+              <div class="settings-heading"><h2 class="panel-title" id="settings-title">Analysis settings</h2><button class="icon-button" id="settings-close" type="button" aria-label="Close settings">×</button></div>
+              <label class="field"><span class="field-label">Investigation goal</span><select class="control" id="goal"><option value="quick_check">Quick check</option><option value="detailed">Detailed</option><option value="custom">Custom question</option></select></label>
+              <label class="field"><span class="field-label">Custom question (optional)</span><textarea class="control" id="custom-question" maxlength="250" placeholder="e.g. What is the main change in this image?"></textarea><span class="char-count"><span id="char-count">0</span>/250</span></label>
+              <div class="field"><div class="threshold-row"><div><div class="field-label">Decision threshold</div><div class="threshold-note">Lower catches more tampering but raises false alarms.</div></div><input id="threshold-number" class="threshold-number" type="number" min="0.10" max="0.90" step="0.01" value="0.50" aria-label="Decision threshold value"></div><div class="range-row"><span>0.10</span><input id="threshold" type="range" min="0.10" max="0.90" step="0.01" value="0.50" aria-label="Decision threshold"><span>0.90</span></div></div>
+              <div class="notice" id="settings-status" aria-live="polite"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="right-column" aria-label="Analysis results">
+          <section class="panel stats" aria-label="Analysis summary">
+            <div class="stat-card"><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg></span><div><div class="stat-value" id="stat-files">0</div><div class="stat-label">Files analysed</div></div></div>
+            <div class="stat-card flagged"><span class="stat-icon warning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><div><div class="stat-value" id="stat-flagged">0</div><div class="stat-label">Flagged for review</div></div></div>
+            <div class="stat-card"><span class="stat-icon error"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 9h.01M15 9h.01M8.5 15.5c1-1 2.2-1.5 3.5-1.5s2.5.5 3.5 1.5"/></svg></span><div><div class="stat-value" id="stat-errors">0</div><div class="stat-label">Errors</div></div></div>
+          </section>
+          <section class="results-grid" id="results-grid" aria-live="polite"><div class="panel empty-state" id="empty-results"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg><div>Analysis results appear here after you analyze media.</div></div></div></section>
+          <section class="panel evidence-panel"><h2 class="panel-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg>ELA evidence</h2><div class="evidence-grid" id="evidence-grid"><div class="empty-state" id="empty-ela">ELA evidence will appear for completed checks.</div></div></section>
+          <section class="panel ask-panel"><h2 class="panel-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-9 8.5 9 9 0 0 1-4-.9L3 21l1.8-4.3A8 8 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>Ask about this image</h2><div class="ask-row"><textarea id="chat-question" class="control" rows="2" maxlength="1000" placeholder="e.g. Where might the image have been edited?" aria-label="Ask about this image"></textarea><button id="chat-send" class="send-button" type="button" aria-label="Send question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13"/></svg></button></div><div class="chat-response" id="chat-response" aria-live="polite"></div><div class="actions-row"><button class="secondary-button" id="export-pdf" type="button"><svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5m-9 4h5m-5 4h5"/></svg>Export PDF report</button><button class="secondary-button primary" id="download-results" type="button"><svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 17v4h16v-4"/></svg>Download results</button></div></section>
+          <section class="panel batch-panel" id="batch-panel"><h2 class="panel-title">Batch analysis</h2><p class="threshold-note">Upload a ZIP archive to run the existing bounded batch pipeline.</p><div class="batch-results" id="batch-results"></div><a class="secondary-button hidden" id="batch-pdf-link" target="_blank" rel="noopener">Download batch PDF</a></section>
+          <section class="panel reports-panel" id="reports-panel"><h2 class="panel-title">Reports</h2><div class="report-list" id="report-list"><div class="notice">Reports appear here after analysis.</div></div></section>
+        </section>
+      </main>
+    </div>
+  </div>
+  <script>
+    (() => {
+      "use strict";
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const defaultSettings = { goal: "quick_check", customQuestion: "", threshold: 0.5 };
+      function storageRead(key) { try { return localStorage.getItem(key); } catch { return null; } }
+      function storageWrite(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } }
+      function loadSettings() {
+        try {
+          const saved = JSON.parse(storageRead("deepfake-localizer.settings") || "{}");
+          return {
+            goal: ["quick_check", "detailed", "custom"].includes(saved.goal) ? saved.goal : defaultSettings.goal,
+            customQuestion: typeof saved.customQuestion === "string" ? saved.customQuestion.slice(0, 250) : "",
+            threshold: Number.isFinite(Number(saved.threshold)) ? Math.max(.1, Math.min(.9, Number(saved.threshold))) : defaultSettings.threshold,
+          };
+        } catch { return { ...defaultSettings }; }
+      }
+      const state = { files: [], results: [], batch: null, active: null, settingsOpen: false, settings: loadSettings() };
+      const storedTheme = storageRead("deepfake-localizer.theme");
+      const initialTheme = storedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.dataset.theme = initialTheme;
+      const apiHeaders = (extra = {}) => {
+        const headers = { ...extra };
+        const token = storageRead("deepfake-localizer.apiToken");
+        if (token) headers["X-Agent-Token"] = token;
+        return headers;
+      };
+      const safeText = (value) => String(value ?? "");
+      const formatSize = (bytes) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+      const escapeHTML = (value) => safeText(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+      async function apiJSON(url, options = {}) {
+        const response = await fetch(url, { ...options, headers: apiHeaders(options.headers || {}) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof data.detail === "string" ? data.detail : data.detail?.message || data.error;
+          const warnings = data.detail?.warnings || [];
+          throw new Error([detail || `Request failed (${response.status})`, ...warnings.map((item) => `${item.filename}: ${item.warning}`)].join(" · "));
+        }
+        return data;
+      }
+      async function loadAsset(path) {
+        const response = await fetch(`/api/assets?${new URLSearchParams({ path })}`, { headers: apiHeaders() });
+        if (!response.ok) return null;
+        return URL.createObjectURL(await response.blob());
+      }
+      function setNotice(message, error = false) {
+        const notice = $("#upload-notice");
+        notice.textContent = message;
+        notice.classList.toggle("error-text", error);
+      }
+      function saveSettings() {
+        const saved = storageWrite("deepfake-localizer.settings", JSON.stringify(state.settings));
+        $("#settings-status").textContent = saved ? "Settings saved on this device." : "Settings apply for this session; browser storage is unavailable.";
+      }
+      function updateThreshold(value, persist = true) {
+        const parsed = Number(value);
+        const clipped = Math.max(.1, Math.min(.9, Number.isFinite(parsed) ? parsed : defaultSettings.threshold));
+        state.settings.threshold = Math.round(clipped * 100) / 100;
+        $("#threshold").value = state.settings.threshold.toFixed(2);
+        $("#threshold-number").value = state.settings.threshold.toFixed(2);
+        if (persist) saveSettings();
+      }
+      let settingsReturnFocus = null;
+      function openSettings() {
+        settingsReturnFocus = document.activeElement;
+        state.settingsOpen = true;
+        $("#settings-overlay").hidden = false;
+        $("#goal").focus();
+      }
+      function closeSettings() {
+        state.settingsOpen = false;
+        $("#settings-overlay").hidden = true;
+        settingsReturnFocus?.focus?.();
+      }
+      function trapSettingsFocus(event) {
+        if (!state.settingsOpen) return;
+        if (event.key === "Escape") { event.preventDefault(); closeSettings(); return; }
+        if (event.key !== "Tab") return;
+        const focusable = [...$("#settings").querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+        if (!focusable.length) { event.preventDefault(); $("#settings").focus(); return; }
+        if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
+        else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+      }
+      function addFiles(fileList) {
+        for (const file of fileList) {
+          if (state.files.some((entry) => entry.file.name === file.name && entry.file.size === file.size)) continue;
+          const entry = { file, objectURL: file.type.startsWith("image/") ? URL.createObjectURL(file) : null, path: null, status: "Ready" };
+          state.files.push(entry);
+        }
+        renderFiles();
+      }
+      function renderFiles() {
+        $("#file-count").textContent = `${state.files.length} ${state.files.length === 1 ? "file" : "files"} uploaded`;
+        $("#file-rows").innerHTML = state.files.map((entry, index) => `<div class="file-row"><div class="file-thumb ${entry.objectURL ? "" : "file-icon"}">${entry.objectURL ? `<img src="${entry.objectURL}" alt="">` : "ZIP"}</div><div><div class="file-name" title="${escapeHTML(entry.file.name)}">${escapeHTML(entry.file.name)}</div><div class="file-meta">${formatSize(entry.file.size)} · ${entry.file.name.toLowerCase().endsWith(".zip") ? "ZIP archive" : "Image"}</div></div><span class="ready-status"><i class="ready-dot"></i>${escapeHTML(entry.status)}</span><button class="remove-file" data-remove="${index}" type="button" aria-label="Remove ${escapeHTML(entry.file.name)}">×</button></div>`).join("");
+        $("#file-rows").querySelectorAll("[data-remove]").forEach((button) => button.addEventListener("click", () => removeFile(Number(button.dataset.remove))));
+      }
+      function removeFile(index) { const [entry] = state.files.splice(index, 1); if (entry?.objectURL && !state.results.some((result) => result.objectURL === entry.objectURL)) URL.revokeObjectURL(entry.objectURL); renderFiles(); }
+      async function upload(entry) {
+        if (entry.uploadData) return entry.uploadData;
+        const query = new URLSearchParams({ filename: entry.file.name });
+        const response = await fetch(`/api/upload?${query}`, { method: "POST", body: entry.file, headers: apiHeaders({ "Content-Type": "application/octet-stream" }) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = typeof data.detail === "string" ? data.detail : data.detail?.message || `Upload failed (${response.status})`;
+          throw new Error([detail, ...(data.detail?.warnings || []).map((item) => `${item.filename}: ${item.warning}`)].join(" · "));
+        }
+        entry.uploadData = data;
+        return data;
+      }
+      const checkNames = { inspect_image: "Image inspection", run_localizer: "Run localizer", validate_prediction: "Validate prediction", generate_ela: "Generate ELA", inspect_metadata: "Inspect metadata", compare_evidence: "Compare evidence" };
+      function verdictLabel(result) { return result.verdict || "Inconclusive"; }
+      function formatScore(score, digits = 3) {
+        if (typeof score !== "number") return "Unavailable";
+        return score !== 0 && Math.abs(score) < 0.001 ? score.toExponential(3) : score.toFixed(digits);
+      }
+      function drawAnnotated(canvas, src, region) {
+        const image = new Image();
+        image.onload = () => {
+          const ratio = Math.min(700 / image.naturalWidth, 450 / image.naturalHeight, 1);
+          canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+          canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+          const context = canvas.getContext("2d");
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          if (region) {
+            context.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--red").trim() || "#df3037";
+            context.lineWidth = Math.max(2, canvas.width / 160);
+            const x = region.horizontal[0] * ratio, y = region.vertical[0] * ratio;
+            const width = (region.horizontal[1] - region.horizontal[0]) * ratio;
+            const height = (region.vertical[1] - region.vertical[0]) * ratio;
+            context.strokeRect(x, y, width, height);
+          }
+        };
+        image.src = src;
+      }
+      function renderResults() {
+        const grid = $("#results-grid");
+        if (!state.results.length) {
+          grid.innerHTML = `<div class="panel empty-state" id="empty-results"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg><div>Analysis results appear here after you analyze media.</div></div>`;
+        } else {
+          grid.innerHTML = state.results.map((item, index) => {
+            const data = item.data;
+            const verdict = verdictLabel(data);
+            const flagged = verdict.toLowerCase().startsWith("flagged");
+            const authentic = verdict === "Not flagged by this detector";
+            const score = formatScore(data.tampered_score_uncalibrated);
+            const checks = (data.tool_log || []).map((check) => { const failed = check.status === "error" || check.status === "timeout"; const mark = check.status === "ok" ? "✓" : failed ? "!" : "·"; return `<li class="check-item"><span class="check-mark ${failed ? "failed" : ""}">${mark}</span>${escapeHTML(checkNames[check.tool] || check.tool)}</li>`; }).join("") || `<li class="check-item">No checks returned</li>`;
+            const annotationLabel = data.region ? "Annotated (tampered region)" : "Annotated (no region localized)";
+            return `<article class="panel result-card" data-result="${index}" tabindex="0" aria-label="Select ${escapeHTML(item.filename)} for follow-up questions"><h3 class="result-title">${index + 1}. ${escapeHTML(item.filename)}${state.active === item ? " · Selected" : ""}</h3><div class="image-pair"><div><div class="image-frame"><img src="${item.objectURL}" alt="Original image: ${escapeHTML(item.filename)}"></div><div class="image-label">Original</div></div><div><div class="image-frame"><canvas id="annotated-${index}" aria-label="Annotated image showing tampered region when available"></canvas></div><div class="image-label">${annotationLabel}</div></div></div><div class="findings"><div class="finding-main"><div class="finding-heading">Findings</div><span class="badge ${flagged ? "flagged" : authentic ? "authentic" : "neutral"}">${escapeHTML(verdict)}</span><div class="score-label">Tampered score (uncalibrated)</div><div class="score-value">${score}</div></div><div class="checks"><div class="checks-title">Checks completed</div><ul class="check-list">${checks}</ul></div></div></article>`;
+          }).join("");
+          state.results.forEach((item, index) => drawAnnotated($(`#annotated-${index}`), item.objectURL, item.data.region));
+        }
+        const flaggedCount = state.results.filter((item) => verdictLabel(item.data).toLowerCase().startsWith("flagged")).length;
+        const errors = state.results.reduce((count, item) => count + (item.data.tool_log || []).filter((tool) => tool.status === "error" || tool.status === "timeout").length, 0);
+        $("#stat-files").textContent = String(state.results.length);
+        $("#stat-flagged").textContent = String(flaggedCount);
+        $("#stat-errors").textContent = String(errors);
+        renderEvidence();
+        renderReports();
+      }
+      async function renderEvidence() {
+        const grid = $("#evidence-grid");
+        const withEla = state.results.filter((item) => item.data.ela_image_path);
+        if (!withEla.length) { grid.innerHTML = `<div class="empty-state">ELA evidence will appear for completed checks.</div>`; return; }
+        grid.innerHTML = withEla.map((item, index) => `<div class="evidence-item"><div class="evidence-image-wrap"><img alt="ELA evidence for ${escapeHTML(item.filename)}" data-ela-index="${index}"></div><div class="evidence-caption">${escapeHTML(item.filename)}</div></div>`).join("");
+        for (const [index, item] of withEla.entries()) {
+          if (item.elaURL) { $(`[data-ela-index="${index}"]`).src = item.elaURL; continue; }
+          const url = await loadAsset(item.data.ela_image_path);
+          if (url) { item.elaURL = url; $(`[data-ela-index="${index}"]`).src = url; }
+        }
+      }
+      function renderReports() {
+        const list = $("#report-list");
+        if (!state.results.length) { list.innerHTML = `<div class="notice">Reports appear here after analysis.</div>`; return; }
+        list.innerHTML = state.results.map((item) => `<div class="report-row"><span>${escapeHTML(item.filename)}</span><span>${escapeHTML(verdictLabel(item.data))}</span><span>${formatScore(item.data.tampered_score_uncalibrated)}</span></div>`).join("");
+      }
+      function renderChatCard(data) {
+        const verdict = verdictLabel(data);
+        const icon = verdict.toLowerCase().startsWith("flagged") ? "⚠️" : verdict === "Not flagged by this detector" ? "✅" : "❔";
+        const score = formatScore(data.tampered_score_uncalibrated, 4);
+        const image = data.image || {};
+        const imageSize = image.width != null && image.height != null ? `${image.width} × ${image.height} px` : "Unavailable";
+        const duration = typeof data.processing_seconds === "number" ? `${data.processing_seconds.toFixed(3)} s` : "Unavailable";
+        let region = "<h4>Suspected tampered region</h4><p>No region localized</p>";
+        if (data.region) {
+          const horizontal = data.region.horizontal || [];
+          const vertical = data.region.vertical || [];
+          region = `<h4>Suspected tampered region</h4><table><thead><tr><th>Axis</th><th>From (px)</th><th>To (px)</th></tr></thead><tbody><tr><td>Horizontal</td><td>${escapeHTML(horizontal[0])}</td><td>${escapeHTML(horizontal[1])}</td></tr><tr><td>Vertical</td><td>${escapeHTML(vertical[0])}</td><td>${escapeHTML(vertical[1])}</td></tr></tbody></table>${typeof data.coverage_percent === "number" ? `<p>Covers about ${data.coverage_percent}%</p>` : ""}`;
+        }
+        const caveat = escapeHTML(data.caveat || "").replace(/\n/g, "<br>");
+        const tools = (data.tool_log || []).map((entry) => `<li>${escapeHTML(entry.tool || "Tool")} · ${escapeHTML(entry.status || "completed")}${entry.detail ? ` — ${escapeHTML(entry.detail)}` : ""}</li>`).join("") || "<li>No tools reported.</li>";
+        const fixedNotice = data.mode === "fixed_pipeline" ? `<p class="fixed-pipeline-notice">Answered by the fixed pipeline; the language model was unavailable.</p>` : "";
+        return `<article class="reply-card"><h3>${icon} ${escapeHTML(verdict)}</h3><table><tbody><tr><th>Verdict</th><td>${escapeHTML(verdict)}</td></tr><tr><th>Tampered score (uncalibrated)</th><td>${score}</td></tr><tr><th>Image size</th><td>${imageSize}</td></tr><tr><th>Processing time</th><td>${duration}</td></tr></tbody></table>${region}<blockquote>${caveat}</blockquote>${fixedNotice}<div class="reply-prose">${escapeHTML(data.answer_text || "")}</div><details class="tools-disclosure"><summary>Tools used</summary><ul>${tools}</ul></details></article>`;
+      }
+      function renderChatThread(item, pending = "") {
+        const turns = item.chatTurns || [];
+        const content = turns.map((turn) => `<div class="chat-turn"><div class="chat-question-bubble">${escapeHTML(turn.question)}</div>${turn.error ? `<div class="chat-error" role="alert">${escapeHTML(turn.error)}</div>` : turn.reply ? renderChatCard(turn.reply) : ""}</div>`).join("");
+        const loading = pending ? `<div class="chat-loading" role="status">${escapeHTML(pending)}</div>` : "";
+        $("#chat-response").innerHTML = content + loading;
+      }
+      async function analyzeMedia() {
+        if (!state.files.length) { setNotice("Choose an image or ZIP archive first.", true); return; }
+        const button = $("#analyze-button"); button.disabled = true;
+        const goal = state.settings.goal;
+        const custom = state.settings.customQuestion.trim();
+        const message = goal === "custom" && custom ? custom : `Please perform a ${goal === "detailed" ? "detailed" : "quick check"} of this image.`;
+        const threshold = state.settings.threshold;
+        const failures = [];
+        try {
+          for (const entry of state.files) {
+            entry.status = "Analyzing"; renderFiles();
+            try {
+              const uploaded = await upload(entry);
+              const images = uploaded.images || [{ filename: uploaded.filename, image_path: uploaded.image_path }];
+              const warnings = uploaded.warnings || [];
+              for (const image of images) {
+                const objectURL = entry.objectURL && images.length === 1 ? entry.objectURL : await loadAsset(image.image_path);
+                const data = await apiJSON("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, image_path: image.image_path, history: [], threshold }) });
+                const item = { filename: image.filename, objectURL, path: image.image_path, data, history: data.conversation_state?.history || [{ role: "user", content: message }, { role: "assistant", content: data.answer_text || "" }], threshold, chatTurns: [{ question: message, reply: data }] };
+                const previous = state.results.findIndex((existing) => existing.path === item.path);
+                if (previous >= 0) state.results.splice(previous, 1, item); else state.results.push(item);
+                state.active = item;
+                renderResults();
+                renderChatThread(item);
+              }
+              if (warnings.length) failures.push(...warnings.map((item) => `${item.filename}: ${item.warning}`));
+              entry.status = "Ready"; renderResults();
+            } catch (error) { entry.status = "Error"; failures.push(`${entry.file.name}: ${error.message}`); }
+            renderFiles();
+          }
+          setNotice(failures.length ? failures.join(" · ") : "Analysis complete.", failures.length > 0);
+          renderBatch(state.batch);
+        } finally { button.disabled = false; }
+      }
+      function renderBatch(result) {
+        const panel = $("#batch-panel");
+        if (!result) return;
+        panel.classList.add("visible");
+        const output = $("#batch-results");
+        output.innerHTML = (result.results || []).map((item) => `<div class="batch-result"><span>${escapeHTML(item.filename)}</span><span class="status">${escapeHTML(item.verdict || item.status || "Completed")}</span><span>${typeof item.tampered_prob === "number" ? item.tampered_prob.toFixed(3) : "Unavailable"}</span></div>`).join("") || `<div class="notice">No image results were returned.</div>`;
+        const pdfLink = $("#batch-pdf-link");
+        if (result.batch_pdf) { pdfLink.classList.remove("hidden"); loadAsset(result.batch_pdf).then((url) => { if (url) pdfLink.href = url; }); }
+        else pdfLink.classList.add("hidden");
+        if (result.error) setNotice(result.error, true);
+      }
+      async function askAboutImage() {
+        const question = $("#chat-question").value.trim();
+        if (!question) return;
+        const item = state.active || state.results[state.results.length - 1];
+        if (!item) { $("#chat-response").innerHTML = `<div class="chat-error" role="alert">Analyze an image before asking a question.</div>`; return; }
+        if (!item.chatTurns) item.chatTurns = [];
+        const turn = { question, reply: null, error: null };
+        item.chatTurns.push(turn);
+        const button = $("#chat-send"); button.disabled = true; button.setAttribute("aria-busy", "true"); renderChatThread(item, "Working…");
+        try {
+          const result = await apiJSON("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: question, image_path: item.path, history: item.history, threshold: item.threshold }) });
+          turn.reply = result;
+          item.history.push({ role: "user", content: question }, { role: "assistant", content: result.answer_text || "" });
+          if (result.conversation_state?.history) item.history = result.conversation_state.history;
+          item.data = result; state.active = item; renderResults();
+          renderChatThread(item);
+          $("#chat-question").value = "";
+        } catch (error) { turn.error = error.message || "The request failed. Please try again."; renderChatThread(item); }
+        finally { button.disabled = false; button.removeAttribute("aria-busy"); }
+      }
+      function switchView(view) {
+        document.querySelectorAll(".top-tab").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.view === view)));
+        $("#batch-panel").classList.toggle("visible", view === "batch" || Boolean(state.batch));
+        $("#reports-panel").classList.toggle("visible", view === "reports");
+        if (view === "batch") $("#batch-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+        if (view === "reports") $("#reports-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      $("#theme-toggle").addEventListener("click", () => { const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = next; storageWrite("deepfake-localizer.theme", next); });
+      $("#profile-button").addEventListener("click", () => { const current = storageRead("deepfake-localizer.apiToken") || ""; const token = prompt("API access token (leave blank for local mode):", current); if (token !== null) { if (token) storageWrite("deepfake-localizer.apiToken", token); else { try { localStorage.removeItem("deepfake-localizer.apiToken"); } catch { /* Storage may be disabled. */ } } } });
+      $("#settings-open").addEventListener("click", openSettings);
+      $("#settings-close").addEventListener("click", closeSettings);
+      $("#settings-overlay").addEventListener("click", (event) => { if (event.target === $("#settings-overlay")) closeSettings(); });
+      document.addEventListener("keydown", trapSettingsFocus);
+      $("#file-input").addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
+      $("#clear-files").addEventListener("click", () => { state.files.forEach((entry) => { if (entry.objectURL && !state.results.some((result) => result.objectURL === entry.objectURL)) URL.revokeObjectURL(entry.objectURL); }); state.files = []; renderFiles(); setNotice(""); });
+      const drop = $("#drop-zone");
+      drop.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("#file-input").click(); } });
+      ["dragenter", "dragover"].forEach((eventName) => drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.add("dragging"); }));
+      ["dragleave", "drop"].forEach((eventName) => drop.addEventListener(eventName, (event) => { event.preventDefault(); drop.classList.remove("dragging"); }));
+      drop.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+      $("#goal").addEventListener("change", (event) => { state.settings.goal = event.target.value; saveSettings(); });
+      $("#custom-question").addEventListener("input", (event) => { state.settings.customQuestion = event.target.value.slice(0, 250); $("#char-count").textContent = String(event.target.value.length); saveSettings(); });
+      $("#threshold").addEventListener("input", (event) => updateThreshold(event.target.value));
+      $("#threshold-number").addEventListener("change", (event) => updateThreshold(event.target.value));
+      $("#goal").value = state.settings.goal;
+      $("#custom-question").value = state.settings.customQuestion;
+      $("#char-count").textContent = String(state.settings.customQuestion.length);
+      updateThreshold(state.settings.threshold, false);
+      $("#analyze-button").addEventListener("click", analyzeMedia);
+      $("#results-grid").addEventListener("click", (event) => { const card = event.target.closest("[data-result]"); if (!card) return; state.active = state.results[Number(card.dataset.result)]; renderResults(); renderChatThread(state.active); });
+      $("#results-grid").addEventListener("keydown", (event) => { if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-result]")) { event.preventDefault(); state.active = state.results[Number(event.target.dataset.result)]; renderResults(); renderChatThread(state.active); } });
+      $("#chat-send").addEventListener("click", askAboutImage);
+      $("#chat-question").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#chat-send").disabled) askAboutImage(); } });
+      document.querySelectorAll(".top-tab").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
+      $("#export-pdf").addEventListener("click", async () => {
+        if (!state.results.length) { setNotice("Analyze at least one image before exporting a report.", true); return; }
+        const button = $("#export-pdf"); button.disabled = true;
+        try {
+          const report = await apiJSON("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_paths: state.results.map((item) => item.path), threshold: state.settings.threshold }) });
+          const url = await loadAsset(report.report_path);
+          if (!url) throw new Error("The report file could not be loaded.");
+          const link = document.createElement("a"); link.href = url; link.download = "deepfake-localizer-report.pdf"; link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          setNotice("PDF report exported.");
+        } catch (error) { setNotice(error.message, true); }
+        finally { button.disabled = false; }
+      });
+      $("#download-results").addEventListener("click", () => { const blob = new Blob([JSON.stringify({ files: state.results.map(({ filename, data }) => ({ filename, ...data })), batch: state.batch }, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "deepfake-localizer-results.json"; link.click(); URL.revokeObjectURL(link.href); });
+      document.addEventListener("click", (event) => { const card = event.target.closest("[data-result]"); if (card) state.active = state.results[Number(card.dataset.result)] || null; });
+      renderFiles(); renderResults();
+    })();
+  </script>
+</body>
+</html>

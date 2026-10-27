@@ -33,15 +33,19 @@ import logging
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from agent.agent_config import get_agent_config, model_entries
 from agent.agent_tools import TOOL_SCHEMAS, ToolContext, run_tool
+from agent.env import load_env
 from agent.memory import trim_messages
 from agent.memory_store import image_hash, load_investigation, save_investigation
 from agent.prompts import SYSTEM_PROMPT, build_user_message
@@ -183,19 +187,182 @@ def _build_client(endpoint: dict[str, Any]) -> Any:
     The key is read from the environment variable NAMED in the config; its
     value never appears here or in any log.
     """
-    from openai import OpenAI
-
     env_name = str(endpoint["api_key_env"])
-    key = os.environ.get(env_name)
-    if not key:
+    key = os.environ.get(env_name, "").strip()
+    if not key or key.casefold() in {"your_key_here", "replace_me", "changeme", "placeholder"}:
         raise RuntimeError(f"environment variable {env_name} is not set")
     config = get_agent_config()
+    if str(endpoint["provider"]).lower() == "anthropic":
+        return _AnthropicCompatClient(
+            key,
+            str(endpoint["base_url"]),
+            float(config["request_timeout_seconds"]),
+        )
+    from openai import OpenAI
+
     return OpenAI(
         api_key=key,
         base_url=endpoint["base_url"],
         timeout=float(config["request_timeout_seconds"]),
         max_retries=0,  # retries are ours, so they are counted and bounded
     )
+
+
+def _configured_endpoints(
+    endpoints: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Keep configured free-tier routes whose credential names have usable keys.
+
+    ``configs/agent.yaml`` contains only the free models approved for routing.
+    This filters providers that are not configured in the current process so a
+    missing fallback key cannot leave the previous provider client active.
+    Values are checked in memory and never returned or logged.
+    """
+    load_env()
+    usable: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for endpoint in endpoints:
+        key_name = str(endpoint["api_key_env"])
+        key = os.environ.get(key_name, "").strip()
+        if key and key.casefold() not in {
+            "your_key_here", "replace_me", "changeme", "placeholder"
+        }:
+            usable.append(endpoint)
+        else:
+            skipped.append(f"{endpoint['model']} (missing {key_name})")
+    return usable, skipped
+
+
+class _AnthropicCompatClient:
+    """Translate the loop's OpenAI-shaped tool calls to Anthropic Messages."""
+
+    def __init__(self, api_key: str, base_url: str, timeout: float):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str = "auto",
+        temperature: float = 0.0,
+    ) -> Any:
+        system = "\n\n".join(
+            str(item.get("content") or "")
+            for item in messages
+            if item.get("role") == "system"
+        )
+        converted: list[dict[str, Any]] = []
+        for item in messages:
+            role = item.get("role")
+            if role == "system":
+                continue
+            if role == "tool":
+                result = {
+                    "type": "tool_result",
+                    "tool_use_id": item.get("tool_call_id", ""),
+                    "content": str(item.get("content", "")),
+                }
+                if converted and converted[-1]["role"] == "user":
+                    converted[-1]["content"].append(result)
+                else:
+                    converted.append({"role": "user", "content": [result]})
+                continue
+            blocks: list[dict[str, Any]] = []
+            if role == "assistant" and item.get("tool_calls"):
+                if item.get("content"):
+                    blocks.append({"type": "text", "text": str(item["content"])})
+                for call in item["tool_calls"]:
+                    function = call.get("function", {})
+                    try:
+                        arguments = json.loads(function.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        arguments = {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": call.get("id", ""),
+                            "name": function.get("name", ""),
+                            "input": arguments,
+                        }
+                    )
+            elif isinstance(item.get("content"), str):
+                blocks.append({"type": "text", "text": item["content"]})
+            else:
+                blocks = item.get("content") or []
+            converted.append(
+                {"role": "assistant" if role == "assistant" else "user", "content": blocks}
+            )
+
+        anthropic_tools = []
+        for tool in tools:
+            function = tool.get("function", {})
+            anthropic_tools.append(
+                {
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "input_schema": function.get(
+                        "parameters", {"type": "object", "properties": {}}
+                    ),
+                }
+            )
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 2048,
+            "messages": converted,
+            "temperature": temperature,
+        }
+        if system:
+            payload["system"] = system
+        if anthropic_tools:
+            payload["tools"] = anthropic_tools
+            payload["tool_choice"] = {"type": "auto" if tool_choice == "auto" else "any"}
+        request = urllib.request.Request(
+            f"{self.base_url}/messages",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "content-type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ProviderHTTPError(exc.code) from None
+        blocks = raw.get("content", [])
+        text = "\n".join(block.get("text", "") for block in blocks if block.get("type") == "text")
+        tool_calls = [
+            SimpleNamespace(
+                id=block.get("id", ""),
+                type="function",
+                function=SimpleNamespace(
+                    name=block.get("name", ""),
+                    arguments=json.dumps(block.get("input", {})),
+                ),
+            )
+            for block in blocks
+            if block.get("type") == "tool_use"
+        ]
+        message = SimpleNamespace(content=text, tool_calls=tool_calls or None)
+        finish_reason = "length" if raw.get("stop_reason") == "max_tokens" else "stop"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)]
+        )
+
+
+class ProviderHTTPError(RuntimeError):
+    """Status-only provider error that cannot disclose request credentials."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code} from Anthropic")
+        self.status_code = status_code
 
 
 def _initial_messages(
@@ -446,6 +613,7 @@ def run_agent_full(
     max_steps: int | None = None,
     client: Any | None = None,
     use_memory: bool = True,
+    threshold: float | None = None,
 ) -> AgentResult:
     """Run one conversation to completion and return everything it produced."""
     config = get_agent_config()
@@ -455,7 +623,18 @@ def run_agent_full(
 
     messages = _initial_messages(goal, image_path, history, config)
     record = _new_record(goal, image_path)
-    ctx = ToolContext(upload_root=_upload_root(), threshold=_default_threshold())
+    skipped_models: list[str] = []
+    if client is None:
+        endpoints, skipped_models = _configured_endpoints(endpoints)
+        if not endpoints:
+            detail = "no configured free-model credentials"
+            if skipped_models:
+                detail += "; skipped: " + ", ".join(skipped_models)
+            return _unavailable(record, messages, 0, detail)
+    ctx = ToolContext(
+        upload_root=_upload_root(),
+        threshold=_default_threshold() if threshold is None else float(threshold),
+    )
 
     config_hash = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
@@ -514,7 +693,9 @@ def run_agent_full(
     selected = select_available(0)
     if selected is None:
         cooling = [str(item["model"]) for item in endpoints]
-        detail = "all models are cooling down; tried: " + ", ".join(cooling)
+        detail = "all configured free models are cooling down; models: " + ", ".join(cooling)
+        if skipped_models:
+            detail += "; skipped: " + ", ".join(skipped_models)
         return _unavailable(record, messages, steps, detail, cooling)
     endpoint_index = selected
     if active is None:

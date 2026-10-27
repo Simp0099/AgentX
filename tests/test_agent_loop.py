@@ -51,6 +51,71 @@ def _inspect_call(path, call_id="call_1"):
     return make_tool_call("inspect_image", {"image_path": str(path)}, call_id=call_id)
 
 
+def test_anthropic_adapter_translates_messages_and_tool_calls(monkeypatch):
+    response_body = json.dumps(
+        {
+            "content": [
+                {"type": "text", "text": "I will inspect this image."},
+                {
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "inspect_image",
+                    "input": {"image_path": "/uploads/photo.png"},
+                },
+            ],
+            "stop_reason": "tool_use",
+        }
+    ).encode()
+
+    class FakeHTTPResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return response_body
+
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data)
+        return FakeHTTPResponse()
+
+    monkeypatch.setattr(loop.urllib.request, "urlopen", fake_urlopen)
+    client = loop._AnthropicCompatClient("test-key", "https://api.anthropic.com/v1", 12)
+
+    result = client.chat.completions.create(
+        model="test-model",
+        messages=[
+            {"role": "system", "content": "Use the tools safely."},
+            {"role": "user", "content": "Inspect the image."},
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect_image",
+                    "description": "Inspect image properties.",
+                    "parameters": {"type": "object", "properties": {"image_path": {"type": "string"}}},
+                },
+            }
+        ],
+    )
+
+    assert captured["timeout"] == 12
+    assert captured["payload"]["system"] == "Use the tools safely."
+    assert captured["payload"]["tools"][0]["name"] == "inspect_image"
+    assert result.choices[0].message.content == "I will inspect this image."
+    call = result.choices[0].message.tool_calls[0]
+    assert call.id == "call_1"
+    assert call.function.name == "inspect_image"
+    assert json.loads(call.function.arguments) == {"image_path": "/uploads/photo.png"}
+
+
 # ---------------------------------------------------------------------------
 # (a) direct final answer
 # ---------------------------------------------------------------------------

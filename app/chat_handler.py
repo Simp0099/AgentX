@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -23,6 +25,24 @@ from agent.rendering import escape_untrusted
 UPLOAD_DIR = Path("artifacts/uploads")
 ELA_TOOL_NAME = "generate_ela"
 _MAX_PREVIEW_CHARS = 1200
+_LOGGER = logging.getLogger(__name__)
+
+
+def _llm_failure_reason(details: list[str]) -> str:
+    """Summarize common provider errors without copying credentials to the UI."""
+    text = " ".join(details).casefold()
+    if any(phrase in text for phrase in ("not set", "not found", "missing", "no model credential")):
+        return "missing provider API key"
+    if "timeout" in text or "timed out" in text:
+        return "request timed out"
+    match = re.search(r"\b([45]\d\d)\b", text)
+    if match:
+        return f"provider returned HTTP {match.group(1)}"
+    if "quota" in text or "rate limit" in text or "rate-limit" in text:
+        return "provider quota or rate limit"
+    if "connection" in text or "temporarily unavailable" in text:
+        return "provider connection failed"
+    return "provider request failed"
 
 
 def _upload_dir() -> Path:
@@ -301,6 +321,7 @@ def agent_chat(
     *,
     detector: Any | None = None,
     client: Any | None = None,
+    threshold: float | None = None,
 ) -> dict[str, Any]:
     """Answer a chat turn with grounded fields and updated conversation state.
 
@@ -344,21 +365,30 @@ def agent_chat(
                 image_path=str(turn_path),
                 history=history,
                 client=client,
+                threshold=threshold,
             )
             if result.stopped_reason == "model_unavailable":
                 mode = "fixed_pipeline"
+                failure_reason = _llm_failure_reason(result.errors or [result.answer])
+                _LOGGER.warning("model chat unavailable: %s; using fixed pipeline", failure_reason)
                 record = run_investigation(
                     str(turn_path),
                     goal="custom",
                     goal_text=message,
-                    config={"max_tool_calls_per_image": 10},
+                    config={
+                        "max_tool_calls_per_image": 10,
+                        **({"threshold": float(threshold)} if threshold is not None else {}),
+                    },
                     planner=False,
                     detector=detector,
                 )
                 record.filename = filename
                 tool_log = _record_tool_log(record, source="fixed pipeline")
                 ela = _ela_from_record(record)
-                answer_text = _fixed_answer(record)
+                answer_text = (
+                    f"{_fixed_answer(record)} Language model unavailable ({failure_reason}); "
+                    "the fixed pipeline supplied this evidence summary."
+                )
                 marker = "models tried:"
                 if marker in result.answer.casefold():
                     marker_index = result.answer.casefold().rfind(marker)
@@ -417,13 +447,22 @@ def agent_chat(
                     "filename": filename,
                     "reused_saved_result": reused,
                 }
-        except Exception:  # unavailable providers and unexpected client errors
+        except Exception as exc:  # unavailable providers and unexpected client errors
             mode = "fixed_pipeline"
+            failure_reason = _llm_failure_reason([f"{type(exc).__name__}: {exc}"])
+            _LOGGER.warning(
+                "model chat exception: %s (%s); using fixed pipeline",
+                type(exc).__name__,
+                failure_reason,
+            )
             record = run_investigation(
                 str(turn_path),
                 goal="custom",
                 goal_text=message,
-                config={"max_tool_calls_per_image": 10},
+                config={
+                    "max_tool_calls_per_image": 10,
+                    **({"threshold": float(threshold)} if threshold is not None else {}),
+                },
                 planner=False,
                 detector=detector,
             )
@@ -432,7 +471,10 @@ def agent_chat(
             ela = _ela_from_record(record)
             if ela is None:
                 ela, generated_ela_path = _ensure_ela_with_path(turn_path)
-            answer_text = _fixed_answer(record)
+            answer_text = (
+                f"{_fixed_answer(record)} Language model unavailable ({failure_reason}); "
+                "the fixed pipeline supplied this evidence summary."
+            )
             updated_history = history + [
                 {"role": "user", "content": message},
                 {"role": "assistant", "content": answer_text},

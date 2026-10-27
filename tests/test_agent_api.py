@@ -8,7 +8,9 @@ temporary directory via ``AGENT_UPLOAD_ROOT``.
 from __future__ import annotations
 
 import sys
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import numpy as np
 import pytest
@@ -71,6 +73,90 @@ def test_health_reports_ok(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_api_health_reports_llm_availability_without_credential_values(client, monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["llm"]["available"] is False
+    assert "OPENROUTER_API_KEY" in response.json()["llm"]["reason"]
+
+
+def test_root_serves_standalone_dashboard(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<title>Deepfake Localizer</title>" in response.text
+    assert "data-theme=\"dark\"" in response.text
+    assert 'storageWrite("deepfake-localizer.theme", next)' in response.text
+
+
+def test_browser_upload_is_saved_inside_upload_root(client, upload_dir):
+    buffer = upload_dir / "source.png"
+    Image.new("RGB", (8, 6), "navy").save(buffer)
+
+    response = client.post(
+        "/api/upload?filename=browser.png",
+        content=buffer.read_bytes(),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    saved = Path(body["image_path"])
+    assert body["filename"] == "browser.png"
+    assert saved.is_file() and saved.parent == upload_dir.resolve()
+
+
+def test_zip_upload_extracts_valid_images_and_skips_macos_and_non_images(client, upload_dir):
+    image_buffer = BytesIO()
+    Image.new("RGB", (9, 7), "navy").save(image_buffer, format="PNG")
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("__MACOSX/._photo.png", b"resource fork")
+        archive.writestr("folder/.DS_Store", b"metadata")
+        archive.writestr("notes.txt", b"not an image")
+        archive.writestr("folder/photo.png", image_buffer.getvalue())
+        archive.writestr("broken.jpg", b"not a jpeg")
+
+    response = client.post(
+        "/api/upload?filename=photos.zip",
+        content=archive_buffer.getvalue(),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["filename"] for item in body["images"]] == ["folder/photo.png"]
+    extracted = Path(body["images"][0]["image_path"])
+    assert extracted.is_file() and extracted.is_relative_to(upload_dir.resolve())
+    assert {item["filename"] for item in body["warnings"]} == {"notes.txt", "broken.jpg"}
+
+
+def test_zip_upload_rejects_slip_paths_and_requires_one_valid_image(client, upload_dir):
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("../outside.png", b"not an image")
+        archive.writestr("notes.txt", b"not an image")
+
+    response = client.post(
+        "/api/upload?filename=invalid.zip",
+        content=archive_buffer.getvalue(),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["message"] == "archive contains no valid supported images"
+    assert not (upload_dir.parent / "outside.png").exists()
+
+
 def test_tools_returns_the_same_schemas(client):
     response = client.get("/tools")
 
@@ -93,7 +179,33 @@ def test_chat_returns_structured_evidence_card(client, image):
     assert "answer_text" in body
     assert "tool_log" in body
     assert body["mode"] == "fixed_pipeline"
+    saved_path = body["conversation_state"]["image_path"]
+    followup = client.post(
+        "/api/chat",
+        json={
+            "message": "What did you find?",
+            "image_path": saved_path,
+            "history": body["conversation_state"]["history"],
+        },
+    )
+    assert followup.status_code == 200
+    assert followup.json()["conversation_state"]["image_path"] == saved_path
     assert not body["answer_text"].startswith("Model unavailable:")
+
+
+def test_report_export_returns_generated_pdf(client, image):
+    response = client.post(
+        "/api/report",
+        json={"image_paths": [str(image)], "threshold": 0.5},
+    )
+
+    assert response.status_code == 200
+    report_path = Path(response.json()["report_path"])
+    try:
+        assert report_path.is_file()
+        assert report_path.read_bytes().startswith(b"%PDF-")
+    finally:
+        report_path.unlink(missing_ok=True)
 
 
 def test_app_imports_without_loading_the_model():

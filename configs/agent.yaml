@@ -10,6 +10,9 @@
 #
 # Primary and fallbacks are the measured ranking from docs/model_selection.md:
 # highest tool-call success rate first, ties broken by lower median latency.
+# Runtime routing is deliberately limited to the four verified free models
+# below. OpenCode Zen community models were rejected by direct API probes and
+# are usable only inside the OpenCode client.
 
 agent:
   # ---- primary (Phase 1 selection) ----
@@ -17,6 +20,9 @@ agent:
   model: "nvidia/nemotron-3.5-lightning:free"
   base_url: "https://openrouter.ai/api/v1"
   api_key_env: OPENROUTER_API_KEY
+  provider_base_urls:
+    anthropic: "https://api.anthropic.com/v1"
+    openai: "https://api.openai.com/v1"
 
   # ---- fallbacks, in the order they should be tried ----
   fallback_models:

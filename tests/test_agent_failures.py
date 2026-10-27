@@ -264,6 +264,46 @@ def test_all_models_exhausted_returns_model_unavailable(tmp_path, monkeypatch):
     assert len(client.requests) == len(endpoints)
 
 
+def test_unconfigured_provider_keys_are_skipped_before_routing(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    monkeypatch.setattr(loop, "load_env", lambda: None)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "offline-test-key")
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
+
+    created = []
+
+    def build(endpoint):
+        created.append(endpoint)
+        return FakeClient([make_message(content="Gemini free fallback response")])
+
+    monkeypatch.setattr(loop, "_build_client", build)
+    result = loop.run_agent_full(
+        "quick_check", str(_image(tmp_path)), client=None, use_memory=False
+    )
+
+    assert result.answer.startswith("Gemini free fallback response")
+    assert created[0]["model"] == endpoints[2]["model"]
+    assert created[0]["api_key_env"] == "GEMINI_API_KEY"
+
+
+def test_no_configured_free_model_key_returns_clear_unavailable(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    monkeypatch.setattr(loop, "load_env", lambda: None)
+    for name in {entry["api_key_env"] for entry in endpoints}:
+        monkeypatch.delenv(name, raising=False)
+
+    result = loop.run_agent_full(
+        "quick_check", str(_image(tmp_path)), client=None, use_memory=False
+    )
+
+    assert result.stopped_reason == "model_unavailable"
+    assert result.answer.startswith("Model unavailable: no configured free-model credentials")
+    assert all(entry["model"] in result.answer for entry in endpoints)
+
+
 def test_retry_after_is_capped_by_configured_maximum(tmp_path, monkeypatch):
     _config(monkeypatch, tmp_path)
     config = loop.get_agent_config()

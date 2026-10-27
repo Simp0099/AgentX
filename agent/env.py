@@ -70,6 +70,10 @@ def load_env(force: bool = False) -> list[str]:
     return list(loaded)
 
 
+# Load dotenv values before provider modules read os.environ.
+load_env()
+
+
 def describe(name: str) -> str:
     """Return ``"set (length N)"`` or ``"missing"`` for one variable.
 
