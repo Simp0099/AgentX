@@ -4,10 +4,11 @@ Only ONE LLM SDK is used: this module owns the provider HTTP call and exposes a
 single interface, ``LLMClient.choose_action``. Nothing lower down may reach for
 the provider directly, so the agent can be pointed at one model and one API.
 
-Configuration (all read from environment variables -- never hardcoded):
-    DEEPFAKE_LLM_API_KEY : the model provider API key
-    DEEPFAKE_LLM_MODEL : the model name (e.g. "gpt-4o-mini")
-    DEEPFAKE_LLM_BASE_URL : optional OpenAI-compatible base URL
+Configuration lives in ``configs/agent.yaml`` (read through
+:mod:`agent.agent_config`). No provider URL or model name is hardcoded here;
+``DEEPFAKE_LLM_MODEL`` and ``DEEPFAKE_LLM_BASE_URL`` exist only as optional
+per-process overrides. The credential is read from the environment variable
+whose NAME ``api_key_env`` gives.
 
 The provider is expected to speak the OpenAI-compatible ``chat/completions``
 contract (tool calls, tool definition blocking). No third-party SDK is required;
@@ -28,8 +29,7 @@ ENV_API_KEY = "DEEPFAKE_LLM_API_KEY"
 ENV_MODEL = "DEEPFAKE_LLM_MODEL"
 ENV_BASE_URL = "DEEPFAKE_LLM_BASE_URL"
 
-# The chat/completions path on an OpenAI-compatible server.
-_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+# The chat/completions path, appended to the configured base URL.
 _CHAT_PATH = "/chat/completions"
 
 
@@ -73,17 +73,27 @@ class LLMClient:
         api_key: str | None = None,
         model: str | None = None,
         base_url: str | None = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float | None = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.environ.get(ENV_API_KEY)
-        self.model = model if model is not None else os.environ.get(ENV_MODEL, "local-fixed")
-        self.base_url = (
-            base_url if base_url is not None else os.environ.get(ENV_BASE_URL, _DEFAULT_BASE_URL)
+        from agent.agent_config import get_agent_config
+
+        config = get_agent_config()
+        self.api_key_env = str(config["api_key_env"])
+        self.api_key = api_key
+        if self.api_key is None:
+            self.api_key = os.environ.get(ENV_API_KEY) or os.environ.get(self.api_key_env)
+        self.model = model if model is not None else (os.environ.get(ENV_MODEL) or config["model"])
+        self.base_url = base_url
+        if self.base_url is None:
+            self.base_url = os.environ.get(ENV_BASE_URL) or config["base_url"]
+        self.timeout_seconds = (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else float(config["request_timeout_seconds"])
         )
-        self.timeout_seconds = timeout_seconds
         if not self.api_key:
             raise LLMNotConfigured(
-                f"LLM provider key not found in environment variable {ENV_API_KEY!r}; "
+                f"LLM provider key not found in environment variable {self.api_key_env!r}; "
                 "the agent will use the deterministic fixed pipeline."
             )
 
@@ -94,7 +104,8 @@ class LLMClient:
     def _post(self, payload: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
         if not self.is_configured:
             raise LLMNotConfigured(
-                f"LLM provider key not found in environment variable {ENV_API_KEY!r}; "
+                f"LLM provider key not found in environment variable "
+                f"{getattr(self, 'api_key_env', ENV_API_KEY)!r}; "
                 "the agent will use the deterministic fixed pipeline."
             )
         body = json.dumps(payload).encode("utf-8")

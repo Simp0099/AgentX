@@ -1,7 +1,7 @@
 """Deterministic policy rules and bounded orchestrator behavior."""
 
 from agent.orchestrator import run_investigation
-from agent.policy import next_checks
+from agent.policy import StopPolicy, next_checks
 from agent.schemas import InvestigationRecord, Observation, ToolResult, Verdict
 from agent.tool_registry import tool_registry
 from agent.verdict import decide
@@ -34,6 +34,51 @@ def record(score=None, goal="quick_check", validation=None, conditional=None):
         "",
         created_at_utc="2026-01-01T00:00:00Z",
     )
+
+
+def test_stop_policy_never_stops_on_a_provisional_score():
+    """Regression: comparing a Verdict member to its .value made should_stop always True."""
+    r = record(0.9)  # inspect + localizer only; validation has not run yet
+
+    stop, reason = StopPolicy().should_stop(r, max_steps=5)
+
+    assert stop is False
+    assert "pending" in reason
+
+
+def test_stop_policy_stops_once_baseline_is_complete_and_confident():
+    r = record(0.2, validation={"valid": True, "issues": []})
+
+    stop, reason = StopPolicy().should_stop(r, max_steps=5)
+
+    assert stop is True
+    assert "evidence_consistent" in reason
+
+
+def test_stop_policy_waits_for_compare_evidence_on_localization_conflict():
+    r = record(0.9, validation={"valid": False, "issues": ["box inverted"]})
+
+    stop, reason = StopPolicy().should_stop(r, max_steps=5)
+
+    assert stop is False
+    assert "compare_evidence" in reason
+
+    # Once the comparison runs and still reports a conflict the verdict is
+    # Inconclusive, so the loop keeps gathering rather than stopping.
+    r.observations.append(
+        Observation("compare_evidence", {}, "ok", {"agreements": [], "conflicts": ["conflict"]})
+    )
+    stop, _reason = StopPolicy().should_stop(r, max_steps=5)
+    assert stop is False
+
+
+def test_stop_policy_stops_on_budget():
+    r = record(0.9)
+
+    stop, reason = StopPolicy().should_stop(r, max_steps=1)
+
+    assert stop is True
+    assert reason == "budget exhausted"
 
 
 def test_uncertain_score_schedules_ela_and_metadata():
