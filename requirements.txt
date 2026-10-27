@@ -12,6 +12,10 @@ gradio>=5.0
 # PDF reporting (agent/reporting.py and tests/test_reporting.py)
 reportlab>=4.0
 
+# Agent model selection (agent/env.py, scripts/probe_models.py)
+openai>=1.40
+python-dotenv>=1.0
+
 # Dev / CI
 pytest>=8.0
 ruff>=0.6

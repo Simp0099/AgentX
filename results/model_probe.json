@@ -1,0 +1,225 @@
+{
+  "generated_utc": "2026-10-27T12:48:44Z",
+  "trials_per_candidate": 5,
+  "call_cap": 60,
+  "calls_used": 27,
+  "results": [
+    {
+      "name": "gemini_2_5_flash",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key_env": "GEMINI_API_KEY",
+      "key_status": "set (length 53)",
+      "passes": 0,
+      "trials_attempted": 0,
+      "trials_planned": 5,
+      "latency_ms": [],
+      "http_errors": [
+        "404 not_found"
+      ],
+      "rate_limit_messages": [],
+      "status": "unreachable",
+      "detail": "404 not_found: Error code: 404",
+      "upstream_verified": false,
+      "notes": "Model id and base URL taken from the checklist PDF, not the companion catalog.",
+      "median_latency_ms": null
+    },
+    {
+      "name": "gemini_3_6_flash",
+      "provider": "gemini",
+      "model": "gemini-3.6-flash",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key_env": "GEMINI_API_KEY",
+      "key_status": "set (length 53)",
+      "passes": 5,
+      "trials_attempted": 5,
+      "trials_planned": 5,
+      "latency_ms": [
+        3958.0,
+        6306.3,
+        1517.4,
+        1844.9,
+        2026.0
+      ],
+      "http_errors": [],
+      "rate_limit_messages": [],
+      "status": "ok",
+      "detail": "tool_calls[0] get_number(n=7)",
+      "upstream_verified": true,
+      "notes": "Companion default model. Catalog-verified with tool_calling true; 429 on the free tier during that project's testing.",
+      "median_latency_ms": 2026.0
+    },
+    {
+      "name": "gemini_3_5_flash_lite",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key_env": "GEMINI_API_KEY",
+      "key_status": "set (length 53)",
+      "passes": 5,
+      "trials_attempted": 5,
+      "trials_planned": 5,
+      "latency_ms": [
+        7800.9,
+        6792.4,
+        3400.6,
+        7782.7,
+        6759.2
+      ],
+      "http_errors": [],
+      "rate_limit_messages": [],
+      "status": "ok",
+      "detail": "tool_calls[0] get_number(n=7)",
+      "upstream_verified": true,
+      "notes": "Companion fallback; confirmed responding live there when gemini-3.6-flash was quota-limited.",
+      "median_latency_ms": 6792.4
+    },
+    {
+      "name": "nemotron_3_5_lightning",
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3.5-lightning:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_status": "set (length 73)",
+      "passes": 5,
+      "trials_attempted": 5,
+      "trials_planned": 5,
+      "latency_ms": [
+        1091.4,
+        814.3,
+        840.1,
+        855.5,
+        980.7
+      ],
+      "http_errors": [],
+      "rate_limit_messages": [],
+      "status": "ok",
+      "detail": "tool_calls[0] get_number(n=7)",
+      "upstream_verified": true,
+      "notes": "Catalog confirms 1M context and tool support; live call was unverified upstream.",
+      "median_latency_ms": 855.5
+    },
+    {
+      "name": "nemotron_3_ultra",
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_status": "set (length 73)",
+      "passes": 5,
+      "trials_attempted": 5,
+      "trials_planned": 5,
+      "latency_ms": [
+        1168.6,
+        5071.2,
+        1522.2,
+        2192.5,
+        960.2
+      ],
+      "http_errors": [],
+      "rate_limit_messages": [],
+      "status": "ok",
+      "detail": "tool_calls[0] get_number(n=7)",
+      "upstream_verified": true,
+      "notes": "Catalog confirms 1M context and tool support; live call was unverified upstream.",
+      "median_latency_ms": 1522.2
+    },
+    {
+      "name": "nemotron_3_super",
+      "provider": "openrouter",
+      "model": "nvidia/nemotron-3-super-120b-a12b:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_status": "set (length 73)",
+      "passes": 0,
+      "trials_attempted": 0,
+      "trials_planned": 5,
+      "latency_ms": [],
+      "http_errors": [
+        "404 not_found"
+      ],
+      "rate_limit_messages": [],
+      "status": "unreachable",
+      "detail": "404 not_found: Error code: 404 - This model is unavailable for free. The paid version is available now - use this slug instead: nvidia/nemotron-3-super-120b-a12b",
+      "upstream_verified": true,
+      "notes": "Catalog confirms 256k context and tool support; live call was unverified upstream.",
+      "median_latency_ms": null
+    },
+    {
+      "name": "inclusionai_ling_3_flash",
+      "provider": "openrouter",
+      "model": "inclusionai/ling-3.0-flash-sante:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "key_status": "set (length 73)",
+      "passes": 0,
+      "trials_attempted": 0,
+      "trials_planned": 5,
+      "latency_ms": [],
+      "http_errors": [
+        "404 not_found"
+      ],
+      "rate_limit_messages": [],
+      "status": "unreachable",
+      "detail": "404 not_found: Error code: 404 - inclusionai/ling-3.0-flash-sante:free is no longer available on OpenRouter: no provider serves this model anymore. See available models at htt",
+      "upstream_verified": false,
+      "notes": "Disabled upstream: retired endpoint, live call returned HTTP 404. Probed anyway so the failure is recorded, not hidden.",
+      "median_latency_ms": null
+    },
+    {
+      "name": "space_bunny_free",
+      "provider": "opencode_zen",
+      "model": "space-bunny-free",
+      "base_url": "https://opencode.ai/zen/v1",
+      "api_key_env": "OPENCODE_ZEN_API_KEY",
+      "key_status": "set (length 51)",
+      "passes": 0,
+      "trials_attempted": 0,
+      "trials_planned": 5,
+      "latency_ms": [],
+      "http_errors": [
+        "400 bad_request"
+      ],
+      "rate_limit_messages": [],
+      "status": "unreachable",
+      "detail": "400 bad_request: Error code: 400 - Upstream request failed: Model is unavailable.",
+      "upstream_verified": true,
+      "notes": "Disabled upstream: HTTP 403 FreeTierError, usable only inside the OpenCode client. Tool calling not advertised.",
+      "median_latency_ms": null
+    },
+    {
+      "name": "big_pickle",
+      "provider": "opencode_zen",
+      "model": "big-pickle",
+      "base_url": "https://opencode.ai/zen/v1",
+      "api_key_env": "OPENCODE_ZEN_API_KEY",
+      "key_status": "set (length 51)",
+      "passes": 0,
+      "trials_attempted": 0,
+      "trials_planned": 5,
+      "latency_ms": [],
+      "http_errors": [
+        "429 rate_limited",
+        "429 rate_limited",
+        "429 rate_limited"
+      ],
+      "rate_limit_messages": [
+        "Error code: 429 - Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go",
+        "Error code: 429 - Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go",
+        "Error code: 429 - Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"
+      ],
+      "status": "unreachable",
+      "detail": "rate limited (429) after retries",
+      "upstream_verified": true,
+      "notes": "Disabled upstream: HTTP 403 FreeTierError ('free tier can only be used from within OpenCode'). Tool calling not advertised.",
+      "median_latency_ms": null
+    }
+  ],
+  "primary": "nemotron_3_5_lightning",
+  "fallbacks": [
+    "nemotron_3_ultra",
+    "gemini_3_6_flash",
+    "gemini_3_5_flash_lite"
+  ]
+}
