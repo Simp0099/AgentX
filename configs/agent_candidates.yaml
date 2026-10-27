@@ -1,0 +1,104 @@
+# Candidate reasoning models for the AI-agent layer (Phase 1).
+#
+# Every entry is taken from either:
+#   * the companion desktop-assistant project's verified model registry
+#     (config.yaml: providers + models blocks), or
+#   * the conversion checklist PDF for the Gemini OpenAI-compatible endpoint.
+# Nothing here is guessed. No credential is stored in this file: the value is
+# looked up at run time from the environment variable named by `api_key_env`.
+#
+# `upstream_verified` mirrors the companion project's `verified` flag: true
+# means that project checked the model id, context length, free status and
+# tool-calling support against the live provider catalog. It is NOT a promise
+# that the model works from this repo, which is what scripts/probe_models.py
+# measures.
+
+providers:
+  gemini:
+    # Gemini's OpenAI-compatible surface (checklist PDF).
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    api_key_env: GEMINI_API_KEY
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key_env: OPENROUTER_API_KEY
+  opencode_zen:
+    # OpenCode Zen serves an OpenAI-compatible API and hosts the community
+    # "Space Bunny" / "Big Pickle" models; these are NOT OpenRouter models.
+    base_url: "https://opencode.ai/zen/v1"
+    api_key_env: OPENCODE_ZEN_API_KEY
+
+candidates:
+  # ---- Google Gemini: OpenAI-compatible endpoint ----
+  - name: gemini_2_5_flash
+    provider: gemini
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    model: "gemini-2.5-flash"
+    api_key_env: GEMINI_API_KEY
+    upstream_verified: false
+    notes: "Model id and base URL taken from the checklist PDF, not the companion catalog."
+
+  - name: gemini_3_6_flash
+    provider: gemini
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    model: "gemini-3.6-flash"
+    api_key_env: GEMINI_API_KEY
+    upstream_verified: true
+    notes: "Companion default model. Catalog-verified with tool_calling true; 429 on the free tier during that project's testing."
+
+  - name: gemini_3_5_flash_lite
+    provider: gemini
+    base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+    model: "gemini-3.5-flash-lite"
+    api_key_env: GEMINI_API_KEY
+    upstream_verified: true
+    notes: "Companion fallback; confirmed responding live there when gemini-3.6-flash was quota-limited."
+
+  # ---- OpenRouter free tier: NVIDIA Nemotron family ----
+  - name: nemotron_3_5_lightning
+    provider: openrouter
+    base_url: "https://openrouter.ai/api/v1"
+    model: "nvidia/nemotron-3.5-lightning:free"
+    api_key_env: OPENROUTER_API_KEY
+    upstream_verified: true
+    notes: "Catalog confirms 1M context and tool support; live call was unverified upstream."
+
+  - name: nemotron_3_ultra
+    provider: openrouter
+    base_url: "https://openrouter.ai/api/v1"
+    model: "nvidia/nemotron-3-ultra-550b-a55b:free"
+    api_key_env: OPENROUTER_API_KEY
+    upstream_verified: true
+    notes: "Catalog confirms 1M context and tool support; live call was unverified upstream."
+
+  - name: nemotron_3_super
+    provider: openrouter
+    base_url: "https://openrouter.ai/api/v1"
+    model: "nvidia/nemotron-3-super-120b-a12b:free"
+    api_key_env: OPENROUTER_API_KEY
+    upstream_verified: true
+    notes: "Catalog confirms 256k context and tool support; live call was unverified upstream."
+
+  - name: inclusionai_ling_3_flash
+    provider: openrouter
+    base_url: "https://openrouter.ai/api/v1"
+    model: "inclusionai/ling-3.0-flash-sante:free"
+    api_key_env: OPENROUTER_API_KEY
+    upstream_verified: false
+    notes: "Disabled upstream: retired endpoint, live call returned HTTP 404. Probed anyway so the failure is recorded, not hidden."
+
+  # ---- OpenCode Zen community free tier ----
+  - name: space_bunny_free
+    provider: opencode_zen
+    base_url: "https://opencode.ai/zen/v1"
+    model: "space-bunny-free"
+    api_key_env: OPENCODE_ZEN_API_KEY
+    upstream_verified: true
+    notes: "Disabled upstream: HTTP 403 FreeTierError, usable only inside the OpenCode client. Tool calling not advertised."
+
+  - name: big_pickle
+    provider: opencode_zen
+    base_url: "https://opencode.ai/zen/v1"
+    model: "big-pickle"
+    api_key_env: OPENCODE_ZEN_API_KEY
+    upstream_verified: true
+    notes: "Disabled upstream: HTTP 403 FreeTierError ('free tier can only be used from within OpenCode'). Tool calling not advertised."
