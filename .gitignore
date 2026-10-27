@@ -38,3 +38,6 @@ kaggle.json
 
 # Misc
 *.zip
+.venv311/
+*.dylib
+.venv311/

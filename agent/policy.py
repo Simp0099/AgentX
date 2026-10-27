@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from agent.config import get_config
-from agent.schemas import InvestigationRecord
+from agent.schemas import InvestigationRecord, Verdict
 from agent.tool_registry import ToolCall
+from agent.verdict import decide  # noqa: F821
 
 
 def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
@@ -62,3 +63,45 @@ def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     if conflict and "compare_evidence" not in done:
         return [[ToolCall("compare_evidence", {"record": record})]]
     return []
+
+
+class StopPolicy:
+    """Bounded investigation stop rules. Applies to both the LLM and the fixed
+    pipeline, so both agree on when the loop may end.
+
+    The loop stops when any of these hold:
+      1. Budget exhausted -- the configured step cap has been reached.
+      2. Evidence consistent -- a confident verdict (not Inconclusive) is
+         already available.
+      3. Validation failed -- a required check ended in error/timeout; the
+         ``decide`` function reports ``Inconclusive`` (the loop keeps running
+         on inconclusive evidence until the budget is exhausted, so the LLM
+         never presents an invented verdict on top of a failed check).
+    Conflicting signals do NOT stop the loop; the loop keeps gathering until
+    the budget is exhausted, at which point ``decide`` reports
+    ``Inconclusive`` instead of a confident verdict.
+    """
+
+    def should_stop(self, record: InvestigationRecord, max_steps: int | None = None) -> tuple[bool, str]:
+        """Return ``(should_stop, reason)`` for the current investigation state."""
+        # 1. Budget exhausted.
+        if max_steps is not None and len(record.observations) >= max_steps:
+            return True, "budget exhausted"
+        # 2. Evidence consistent -> a confident verdict already exists.
+        verdict, _reasons = decide(record)
+        if verdict is not None and verdict != Verdict.INCONCLUSIVE.value:
+            return True, "evidence_consistent; confident verdict available"
+        # 3. Validation failed / inconclusive signals -> keep gathering up to
+        #    the budget rather than inventing a verdict.
+        return False, "signals_conflict_or_insufficient; continue"
+
+    def remaining_budget(self, record: InvestigationRecord) -> int:
+        config = get_config()
+        budget = int(config.get("forensics", {}).get("max_tool_calls_per_image", 10))
+        return max(0, budget - len(record.observations))
+
+
+def should_stop(record: InvestigationRecord, max_steps: int | None = None) -> tuple[bool, str]:
+    """Module-level convenience wrapper used by the orchestrator."""
+    return StopPolicy().should_stop(record, max_steps=max_steps)
+

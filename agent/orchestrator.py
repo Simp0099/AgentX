@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from typing import Any
 
 from agent.config import get_config
-from agent.policy import next_checks
+from agent.llm_client import LLMClient, LLMNotConfigured, get_llm_client
+from agent.policy import next_checks, should_stop
 from agent.schemas import InvestigationRecord, Observation, ToolResult
 from agent.summary import SummaryBuilder
 from agent.tool_registry import PLANNER_TOOLS, ToolCall, tool_registry, validate_args
@@ -227,3 +229,222 @@ def run_investigation(
         except Exception as exc:
             record.errors.append(f"planner summary unavailable: {type(exc).__name__}")
     return record
+
+
+# ---------------------------------------------------------------------------
+# LLM-driven investigation loop (bounded, per-tool timeout, deterministic
+# fallback labelled 'fixed pipeline (no LLM)').
+# ---------------------------------------------------------------------------
+
+MAX_STEPS = 5  # default number of LLM turn-steps per investigation
+
+
+def build_tool_schemas() -> list[dict[str, Any]]:
+    """Return the JSON schemas of the approved tools, cached."""
+    cache_key = "_tool_schemas"
+    if not getattr(build_tool_schemas, cache_key, None):
+        setattr(build_tool_schemas, cache_key, [
+            entry["input_schema"] for entry in tool_registry.values()
+        ])
+    return getattr(build_tool_schemas, cache_key)  # type: ignore[return-value]
+
+
+def _run_one_llm_tool(
+    record: InvestigationRecord,
+    tool_name: str,
+    args: dict[str, Any],
+    detector: Any | None,
+    config: dict[str, Any],
+    timeout: float | None,
+) -> Observation:
+    """Execute one approved tool through the typed registry runner and record it."""
+    result = tool_registry[tool_name]["run"](
+        config=config, detector=detector, timeout=timeout, **args
+    )
+    status = result.status
+    rationale = result.error or ("tool completed" if status == "ok" else "")
+    if status == "ok" and tool_name == "inspect_image" and result.result:
+        digest = result.result.get("sha256")
+        if isinstance(digest, str):
+            record.sha256 = digest
+            record.image_id = digest
+    if status == "ok" and tool_name == "run_localizer" and result.result:
+        record.model_version = str(result.result.get("model_version") or record.model_version)
+    observation = Observation(
+        tool=tool_name,
+        args=dict(args),
+        status=status,
+        result=result.result,
+        duration_ms=result.duration_ms,
+        rationale=rationale,
+    )
+    record.observations.append(observation)
+    if status in ("error", "timeout"):
+        record.errors.append(f"{tool_name}: {result.error or status}")
+    return observation
+
+
+def _run_llm_loop(
+    image_path: str,
+    goal: str,
+    goal_text: str,
+    config: dict[str, Any],
+    detector: Any | None,
+    llm_client: LLMClient,
+    max_steps: int,
+    tool_timeout: float | None,
+) -> InvestigationRecord:
+    """The bounded LLM-driven loop. The report is built only from recorded
+    observations -- the LLM proposes tool calls but never results."""
+    supplied_config = config or {}
+    full_config = get_config()
+    threshold = float(
+        supplied_config.get(
+            "threshold", full_config.get("output", {}).get("threshold", 0.5)
+        )
+    )
+
+    record = InvestigationRecord(
+        investigation_id=str(uuid.uuid4()),
+        image_id=str(uuid.uuid4()),
+        filename=os.path.basename(image_path),
+        goal=goal,
+        goal_text=goal_text[:2000],
+        threshold=threshold,
+        config_snapshot_hash=hashlib.sha256(str(supplied_config).encode()).hexdigest()[:16],
+        model_version=str(supplied_config.get("model_version", "unknown")),
+        observations=[],
+        errors=[],
+        rationale="",
+        image_path=image_path,
+        planner_status="available",
+        config_snapshot=dict(full_config, **supplied_config),
+    )
+
+    tool_schemas = build_tool_schemas()
+    llm = llm_client if llm_client is not None else get_llm_client()
+
+    for _step in range(max_steps):
+        # (a) Ask the LLM for the next action: goal + recorded state + schemas.
+        try:
+            decision = llm.choose_action(
+                goal,
+                [
+                    {
+                        "tool": o.tool,
+                        "args": o.args,
+                        "status": o.status,
+                        "result": o.result,
+                        "rationale": o.rationale,
+                        "timestamp_utc": o.timestamp_utc,
+                    }
+                    for o in record.observations
+                ],
+                tool_schemas,
+                timeout_seconds=tool_timeout,
+            )
+        except LLMNotConfigured:
+            # No key reachable: fall back to the deterministic fixed pipeline.
+            fallback = run_investigation(
+                image_path,
+                goal=goal,
+                goal_text=goal_text,
+                config=supplied_config,
+                detector=detector,
+            )
+            fallback.rationale = (
+                f"fixed pipeline (no LLM); {fallback.rationale or '(no rationale)'}"
+            )
+            return fallback
+
+        if decision.finished:
+            # (b) LLM says finish -> stop.
+            break
+
+        # (c) Validate the tool name against the registry.
+        if decision.tool not in tool_registry:
+            record.observations.append(
+                Observation(
+                    decision.tool,
+                    decision.arguments,
+                    "rejected",
+                    rationale=f"unapproved tool name: {decision.tool}",
+                )
+            )
+            record.errors.append(f"rejected {decision.tool}: unapproved tool name")
+            continue
+
+        # (c) Validate the arguments against the tool's JSON schema.
+        valid, reason = validate_args(decision.tool, decision.arguments)
+        if not valid:
+            record.observations.append(
+                Observation(
+                    decision.tool,
+                    decision.arguments,
+                    "rejected",
+                    rationale=f"invalid arguments rejected: {reason}",
+                )
+            )
+            record.errors.append(f"rejected {decision.tool}: {reason}")
+            continue
+
+        # (d) Execute the tool with a per-tool timeout and store the observation.
+        _run_one_llm_tool(
+            record, decision.tool, decision.arguments, detector, config, tool_timeout
+        )
+
+        # Stop rules: budget exhausted, evidence consistent.
+        stop, _reason = should_stop(record, max_steps)
+        if stop:
+            break
+
+    # The final report is built ONLY from the recorded observations.
+    verdict, reasons = decide(record)
+    record.verdict = verdict
+    record.verdict_reasons = reasons
+    record.rationale = "; ".join(reasons)
+    template = SummaryBuilder(record)
+    record.summary = template.build()
+    return record
+
+
+def run_llm_investigation(
+    image_path: str,
+    goal: str = "quick_check",
+    goal_text: str = "",
+    config: dict[str, Any] | None = None,
+    detector=None,
+    llm_client=None,
+    max_steps: int = MAX_STEPS,
+    tool_timeout: float | None = None,
+) -> InvestigationRecord:
+    """Entry point for the bounded LLM-driven agent.
+
+    When an LLM client is supplied (or can be built from the environment) and
+    is configured, the investigation runs via the LLM-driven loop. When no
+    LLM key is configured, the deterministic fixed pipeline is run and the
+    record is labelled 'fixed pipeline (no LLM)'.
+    """
+    supplied_config = config or {}
+    if llm_client is None and get_llm_client() is None:
+        record = run_investigation(
+            image_path,
+            goal=goal,
+            goal_text=goal_text,
+            config=supplied_config,
+            detector=detector,
+        )
+        record.rationale = (
+            f"fixed pipeline (no LLM); {record.rationale or '(no rationale)'}"
+        )
+        return record
+    return _run_llm_loop(
+        image_path,
+        goal,
+        goal_text,
+        supplied_config,
+        detector,
+        llm_client,
+        max_steps,
+        tool_timeout,
+    )
