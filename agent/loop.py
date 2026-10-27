@@ -29,11 +29,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +59,87 @@ BACKOFF_SECONDS = (1.0, 2.0)
 
 # Attempts against one model before moving to the next one.
 MAX_PROVIDER_RETRIES = 2
+_MODEL_COOLDOWNS: dict[str, float] = {}
+_LOGGER = logging.getLogger(__name__)
 
 ENV_UPLOAD_ROOT = "AGENT_UPLOAD_ROOT"
 DEFAULT_UPLOAD_ROOT = "artifacts/uploads"
 
 ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = ROOT / "logs" / "agent.log"
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    category: str
+    cause: str
+    retry_after: float | None = None
+
+
+def _provider_failure(exc: Exception) -> ProviderFailure:
+    """Classify an SDK/provider exception using status, headers and safe text."""
+    response = getattr(exc, "response", None)
+    status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+    headers = getattr(exc, "headers", None) or getattr(response, "headers", None) or {}
+    try:
+        retry_after_value = headers.get("Retry-After") or headers.get("retry-after")
+    except AttributeError:
+        retry_after_value = None
+    try:
+        retry_after = max(0.0, float(retry_after_value)) if retry_after_value is not None else None
+    except (TypeError, ValueError):
+        try:
+            retry_after = (
+                max(
+                    0.0,
+                    (parsedate_to_datetime(str(retry_after_value)) - datetime.now(timezone.utc))
+                    .total_seconds(),
+                )
+                if retry_after_value is not None
+                else None
+            )
+        except (TypeError, ValueError, OverflowError):
+            retry_after = None
+    text = str(exc)
+    lowered = text.casefold()
+    if status is None:
+        match = re.search(r"\b([45]\d\d)\b", text)
+        status = int(match.group(1)) if match else None
+    cause = f"{type(exc).__name__}: {text[:300]}"
+    if status == 429 or (retry_after is not None and status is None) or any(
+        term in lowered
+        for term in (
+            "quota", "rate limit", "rate-limit", "too many requests",
+            "token exhausted", "token exhaustion",
+        )
+    ):
+        return ProviderFailure("quota", cause, retry_after)
+    if status in (400, 401) or "invalid request" in lowered or "authentication" in lowered:
+        return ProviderFailure("fatal", cause)
+    if status is not None and 500 <= int(status) <= 599:
+        return ProviderFailure("transient", cause, retry_after)
+    if isinstance(exc, (TimeoutError, ConnectionError)) or any(
+        term in lowered
+        for term in ("timeout", "timed out", "connection", "temporarily unavailable")
+    ):
+        return ProviderFailure("transient", cause)
+    if status is not None and 400 <= int(status) <= 499:
+        return ProviderFailure("fatal", cause)
+    return ProviderFailure("fatal", cause)
+
+
+def _log_switch(model: str, next_model: str | None, reason: str) -> None:
+    """Log a provider route change without including request credentials."""
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    destination = next_model or "none"
+    line = f"{stamp} model_switch from={model} to={destination} reason={reason[:300]}"
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+    _LOGGER.warning("%s", line)
 
 
 @dataclass
@@ -421,11 +499,34 @@ def run_agent_full(
     identical_calls: dict[str, int] = {}
     retry_limit_reached = False
 
+    tried: list[str] = []
+    unavailable: list[str] = []
+
+    def select_available(start: int) -> int | None:
+        now = time.monotonic()
+        for candidate in range(start, len(endpoints)):
+            candidate_model = str(endpoints[candidate]["model"])
+            deadline = _MODEL_COOLDOWNS.get(candidate_model, 0.0)
+            if deadline <= now:
+                return candidate
+        return None
+
+    selected = select_available(0)
+    if selected is None:
+        cooling = [str(item["model"]) for item in endpoints]
+        detail = "all models are cooling down; tried: " + ", ".join(cooling)
+        return _unavailable(record, messages, steps, detail, cooling)
+    endpoint_index = selected
     if active is None:
         try:
-            active = _build_client(endpoints[0])
+            active = _build_client(endpoints[endpoint_index])
         except Exception as exc:
-            return _unavailable(record, messages, steps, f"{exc}")
+            failure = _provider_failure(exc)
+            tried.append(str(endpoints[endpoint_index]["model"]))
+            unavailable.append(
+                f"{endpoints[endpoint_index]['model']} ({failure.category}: {failure.cause})"
+            )
+            return _unavailable(record, messages, steps, "; ".join(unavailable), tried)
 
     while True:
         if steps >= limit:
@@ -433,7 +534,10 @@ def run_agent_full(
             stopped_reason = "max_steps"
             break
 
-        endpoint = endpoints[min(endpoint_index, len(endpoints) - 1)]
+        endpoint = endpoints[endpoint_index]
+        model_name = str(endpoint["model"])
+        if not tried or tried[-1] != model_name:
+            tried.append(model_name)
         try:
             response = active.chat.completions.create(
                 model=endpoint["model"],
@@ -442,28 +546,56 @@ def run_agent_full(
                 tool_choice="auto",
                 temperature=temperature,
             )
-        except Exception as exc:  # 429, timeout, 400, 5xx, connection failure
-            if retries < MAX_PROVIDER_RETRIES:
+        except Exception as exc:
+            failure = _provider_failure(exc)
+            if failure.category == "transient" and retries < MAX_PROVIDER_RETRIES:
                 retries += 1
                 delay = BACKOFF_SECONDS[min(retries - 1, len(BACKOFF_SECONDS) - 1)]
+                if failure.retry_after is not None:
+                    maximum = float(config.get("retry_after_max_seconds", 60))
+                    delay = min(failure.retry_after, maximum)
                 if delay:
                     time.sleep(delay)
                 continue
-            if endpoint_index >= len(endpoints) - 1:
-                detail = f"{type(exc).__name__}: {str(exc)[:300]}"
-                record.errors.append(f"provider failed on {endpoint['model']}: {detail}")
-                return _unavailable(record, messages, steps, detail)
-            record.errors.append(
-                f"provider error on {endpoint['model']}; falling back to "
-                f"{endpoints[endpoint_index + 1]['model']}"
-            )
-            endpoint_index += 1
+            if failure.category == "fatal":
+                detail = f"{model_name} failed ({failure.category}): {failure.cause}"
+                record.errors.append(detail)
+                _log_switch(model_name, None, f"{failure.category}: {type(exc).__name__}")
+                return _unavailable(record, messages, steps, detail, tried)
+            if failure.category == "quota":
+                cooldown = float(config.get("cooldown_seconds", 900))
+                _MODEL_COOLDOWNS[model_name] = time.monotonic() + cooldown
+            detail = f"{model_name} failed ({failure.category}): {failure.cause}"
+            unavailable.append(detail)
+            record.errors.append(detail)
+            next_index = select_available(endpoint_index + 1)
             retries = 0
+            if next_index is None:
+                _log_switch(model_name, None, failure.category)
+                models = ", ".join(tried)
+                cause_text = "; ".join(unavailable)
+                return _unavailable(
+                    record,
+                    messages,
+                    steps,
+                    f"{cause_text}; models tried: {models}",
+                    tried,
+                )
+            next_model = str(endpoints[next_index]["model"])
+            _log_switch(model_name, next_model, failure.category)
+            record.errors.append(
+                f"provider switched from {model_name} to {next_model}: {failure.category}"
+            )
+            endpoint_index = next_index
             if client is None:
                 try:
                     active = _build_client(endpoints[endpoint_index])
                 except Exception as build_exc:
-                    return _unavailable(record, messages, steps, f"{build_exc}")
+                    build_failure = _provider_failure(build_exc)
+                    unavailable.append(
+                        f"{next_model} failed ({build_failure.category}): {build_failure.cause}"
+                    )
+                    continue
             continue
 
         steps += 1
@@ -553,6 +685,7 @@ def _unavailable(
     messages: list[dict[str, Any]],
     steps: int,
     detail: str,
+    tried: list[str] | None = None,
 ) -> AgentResult:
     """Build the structured failure. Never a fabricated final answer."""
     record.errors.append(f"model unavailable: {detail}")
@@ -561,7 +694,14 @@ def _unavailable(
     record.verdict_reasons = reasons
     record.rationale = "; ".join(reasons)
     return AgentResult(
-        answer=f"Model unavailable: {detail}",
+        answer=(
+            f"Model unavailable: {detail}"
+            + (
+                f". Models tried: {', '.join(tried)}"
+                if tried and "models tried:" not in detail
+                else ""
+            )
+        ),
         messages=messages,
         record=record,
         steps=steps,

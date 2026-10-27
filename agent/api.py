@@ -121,6 +121,14 @@ class NoArgumentsRequest(_StrictModel):
     """``compare_evidence`` takes no model-supplied arguments."""
 
 
+class ChatRequest(_StrictModel):
+    """A chat turn over an image already present in the allowed upload root."""
+
+    message: str = Field(min_length=1, max_length=4000)
+    image_path: str = Field(min_length=1)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+
+
 # tool name -> request model. Keeping this explicit means a missing field is a
 # schema error at import time, not a surprise 500 at request time.
 REQUEST_MODELS: dict[str, type[BaseModel]] = {
@@ -244,6 +252,34 @@ def health() -> dict[str, str]:
 def list_tools() -> list[dict[str, Any]]:
     """Return the approved tool schemas in OpenAI ``tools`` format."""
     return TOOL_SCHEMAS
+
+
+@app.post("/api/chat", dependencies=[Depends(require_token)])
+def chat(payload: ChatRequest) -> dict[str, Any]:
+    """Run one chat turn and return the evidence card fields as JSON."""
+    image_path = Path(payload.image_path).expanduser().resolve()
+    try:
+        image_path.relative_to(upload_root().resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="image_path is outside the allowed upload directory"
+        ) from None
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="image_path does not exist")
+
+    from app.chat_handler import agent_chat
+
+    result = agent_chat(
+        payload.message,
+        None,
+        {
+            "image_path": str(image_path),
+            "filename": image_path.name,
+            "history": payload.history,
+        },
+        detector=get_detector(),
+    )
+    return {key: value for key, value in result.items() if not key.startswith("_")}
 
 
 def _run_and_log(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:

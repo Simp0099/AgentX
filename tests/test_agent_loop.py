@@ -26,6 +26,7 @@ from tests.fakes import FakeClient, make_message, make_tool_call, tool_messages 
 @pytest.fixture(autouse=True)
 def _zero_backoff(monkeypatch, tmp_path):
     monkeypatch.setattr(loop, "BACKOFF_SECONDS", (0.0, 0.0))
+    loop._MODEL_COOLDOWNS.clear()
     config = get_agent_config().copy()
     config["memory"] = {"enabled": True, "path": str(tmp_path / "memory.sqlite")}
     monkeypatch.setattr(loop, "get_agent_config", lambda: config)
@@ -233,17 +234,18 @@ def test_provider_errors_retries_then_falls_back_to_the_next_model(image):
     endpoints = model_entries(get_agent_config())
     primary = endpoints[0]["model"]
     fallback = endpoints[1]["model"]
-    failures = _provider_errors(loop.MAX_PROVIDER_RETRIES + 1)  # initial attempt + 2 retries
-    client = FakeClient([*failures, make_message(content="ok from the fallback")])
+    client = FakeClient([
+        RuntimeError("429 too many requests"),
+        make_message(content="ok from the fallback"),
+    ])
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
     assert answer.startswith("ok from the fallback")
     models = [request["model"] for request in client.requests]
-    # Three failed attempts against the primary (attempt + two retries), then
-    # the switch to the fallback model succeeds.
-    assert models == [primary, primary, primary, fallback]
-    assert len(models) == (loop.MAX_PROVIDER_RETRIES + 2)
+    # Quota moves directly to the first fallback without retrying the primary.
+    assert models == [primary, fallback]
+    assert len(models) == 2
 
 
 def test_every_endpoint_failing_returns_a_structured_failure(image):

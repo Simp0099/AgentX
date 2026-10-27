@@ -80,6 +80,22 @@ def test_tools_returns_the_same_schemas(client):
     assert sorted(names) == sorted(TOOLS)
 
 
+def test_chat_returns_structured_evidence_card(client, image):
+    response = client.post(
+        "/api/chat",
+        json={"message": "Check this image", "image_path": str(image)},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["image"]["filename"] == image.name
+    assert "tampered_score_uncalibrated" in body
+    assert "answer_text" in body
+    assert "tool_log" in body
+    assert body["mode"] == "fixed_pipeline"
+    assert not body["answer_text"].startswith("Model unavailable:")
+
+
 def test_app_imports_without_loading_the_model():
     # Importing the module must not have imported TensorFlow.
     assert "tensorflow" not in sys.modules or api._detector_loaded is False

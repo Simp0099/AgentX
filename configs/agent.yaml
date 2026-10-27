@@ -37,6 +37,8 @@ agent:
   max_steps: 6
   temperature: 0.0
   request_timeout_seconds: 30
+  retry_after_max_seconds: 60
+  cooldown_seconds: 900
   # Re-sending an identical tool call is allowed this many times, then the
   # loop must change approach or stop, so a confused model cannot spin.
   max_identical_retries: 2

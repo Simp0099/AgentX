@@ -2,6 +2,7 @@
 
 import os
 import sys
+from html import escape
 from pathlib import Path
 
 from PIL import Image
@@ -32,7 +33,66 @@ def analyze(image, threshold):
 
 def chat(message, image, state):
     """Route a chat turn through the testable chat handler."""
-    return _agent_chat(message, image, state, detector=DETECTOR)
+    result = _agent_chat(message, image, state, detector=DETECTOR)
+    return (
+        render_chat_card(result),
+        result["tool_log"],
+        result["ela_image_path"],
+        result.get("_state", state),
+    )
+
+
+def render_chat_card(data):
+    """Render the structured chat reply as an evidence card."""
+    verdict = data.get("verdict") or "Inconclusive"
+    icon = {
+        "Flagged for review": "🚩",
+        "Flagged, region unavailable": "⚠️",
+        "Not flagged by this detector": "✅",
+        "Inconclusive": "❔",
+    }.get(verdict, "❔")
+    score = data.get("tampered_score_uncalibrated")
+    score_text = f"{score:.4f}" if isinstance(score, (int, float)) else "Unavailable"
+    image = data.get("image") or {}
+    width, height = image.get("width"), image.get("height")
+    size_text = (
+        f"{width} × {height} px"
+        if width is not None and height is not None
+        else "Unavailable"
+    )
+    duration = data.get("processing_seconds")
+    duration_text = f"{duration:.3f} s" if isinstance(duration, (int, float)) else "Unavailable"
+    region = data.get("region")
+    if region:
+        horizontal = region["horizontal"]
+        vertical = region["vertical"]
+        region_html = (
+            '<h3>Suspected tampered region</h3><table><thead><tr>'
+            '<th>Axis</th><th>From (px)</th><th>To (px)</th></tr></thead><tbody>'
+            f'<tr><td>Horizontal</td><td>{escape(str(horizontal[0]))}</td>'
+            f'<td>{escape(str(horizontal[1]))}</td></tr>'
+            f'<tr><td>Vertical</td><td>{escape(str(vertical[0]))}</td>'
+            f'<td>{escape(str(vertical[1]))}</td></tr></tbody></table>'
+        )
+        coverage = data.get("coverage_percent")
+        if isinstance(coverage, (int, float)):
+            region_html += f'<p>Covers about {coverage:g}%</p>'
+    else:
+        region_html = "<h3>Suspected tampered region</h3><p>No region localized</p>"
+    answer = escape(str(data.get("answer_text") or "")).replace("\n", "<br>")
+    caveat = escape(str(data.get("caveat") or "")).replace("\n", "<br>")
+    return (
+        '<article class="evidence-card">'
+        f'<h2>{icon} {escape(verdict)}</h2>'
+        '<table><tbody>'
+        f'<tr><th>Verdict</th><td>{escape(verdict)}</td></tr>'
+        f'<tr><th>Tampered score (uncalibrated)</th><td>{score_text}</td></tr>'
+        f'<tr><th>Image size</th><td>{size_text}</td></tr>'
+        f'<tr><th>Processing time</th><td>{duration_text}</td></tr>'
+        f'</tbody></table>{region_html}'
+        f'<blockquote>{caveat}</blockquote>'
+        f'<p>{answer}</p></article>'
+    )
 
 
 def analyze_uploads(files, threshold, goal, custom_text):
@@ -174,7 +234,7 @@ with gr.Blocks(title="Deepfake Tampering Localizer") as demo:
             chat_submit = gr.Button("Ask", variant="primary")
             with gr.Row():
                 with gr.Column():
-                    chat_answer = gr.Markdown(label="Answer")
+                    chat_answer = gr.HTML(label="Answer")
                     with gr.Accordion("Tool calls and evidence", open=False):
                         chat_tool_log = gr.JSON(
                             label="Calls, arguments, status, and result preview"

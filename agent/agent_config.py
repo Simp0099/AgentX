@@ -33,6 +33,8 @@ REQUIRED_FIELDS = (
     "max_steps",
     "temperature",
     "request_timeout_seconds",
+    "retry_after_max_seconds",
+    "cooldown_seconds",
     "max_identical_retries",
     "reflection",
     "memory",
@@ -80,10 +82,18 @@ def _validate(config: Any, source: str) -> dict[str, Any]:
     _require_fields(agent["history"], REQUIRED_HISTORY_FIELDS, f"{source}: history")
 
     # Numeric bounds: a zero or negative budget would make the loop a no-op.
-    for field_name in ("max_steps", "request_timeout_seconds"):
+    for field_name in (
+        "max_steps", "request_timeout_seconds", "retry_after_max_seconds", "cooldown_seconds"
+    ):
         value = agent[field_name]
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
-            raise AgentConfigError(f"{source}: '{field_name}' must be a positive number")
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or value < 0
+            or (field_name != "cooldown_seconds" and value == 0)
+        ):
+            requirement = "non-negative" if field_name == "cooldown_seconds" else "positive"
+            raise AgentConfigError(f"{source}: '{field_name}' must be a {requirement} number")
     if not 0.0 <= float(agent["temperature"]) <= 2.0:
         raise AgentConfigError(f"{source}: 'temperature' must be between 0.0 and 2.0")
 
