@@ -1,91 +1,170 @@
-# Phase-by-phase forensic system report
+# Evidence-based phase report
 
-Audit run: 2026-10-27. DONE requires passing tests, saved evidence in `docs/`, and a mutation test caught by those tests. Statuses below reflect that bar. Exact environment output is in [docs/baseline.md](docs/baseline.md).
+This report uses only the requested evidence: `docs/baseline.md`,
+`docs/agent_evidence.md`, `docs/demo_checklist.md`, `docs/pdf_check.txt`,
+`docs/evaluation.md`, `results/`, and `docs/docker_check.md`.
 
-## Phase status
+System label: **agentic conditional investigation pipeline**. The evidence
+records three distinct image-backed cases in which conditional checks change
+the verdict; each baseline verdict is “Flagged, region unavailable” and each
+full-investigation verdict is “Inconclusive.”
 
-| Phase | Status | Evidence |
+## Per-phase status
+
+| Phase | Status | Test names and recorded evidence |
 |---|---|---|
-| 0 Environment | BLOCKED | Python 3.11 test environment runs all tests, but project venv dependency installation cannot reach PyPI; sandbox denied `.git` creation, so there is no history baseline. Evidence: `docs/baseline.md`. |
-| 1 Stubs and tools | DONE | `tests/test_agent_tools.py` (6 tests cover success/error/timeout for each tool), `tests/test_inspect_image.py::test_digest_matches_file_bytes`; all pass. Digest mutation caused the byte-hash assertion to fail. Tool contract and limits documented in source/config. |
-| 2 Wiring | DONE (import-level) | `tests/test_wiring.py` passes and mutation removing the orchestrator import fails. `docs/wiring.md` lists app and library-only modules. App imports but does not invoke the orchestrator; UI inference is not yet routed through it. Exactly one Gradio entrypoint found statically. |
-| 3 Policy/outcome agency | PARTIAL | `tests/test_agent_policy.py` (7 tests) passes, including trigger rules, budget=2, invalid-inspect early stop, unresolved conflict, and one conditional outcome change. Disabling uncertainty rule fails its test. Only one outcome-changing input is demonstrated; no three image-backed cases were established. See `docs/agent_evidence.md`. |
-| 4 Summary | DONE | `tests/test_gradio.py::test_summary_numeric_parser_rejects_unstored_number` passes; mutation that accepted every number fails the parser test. |
-| 5 Optional planner | BLOCKED | No validated planner client/rejection-budget/unavailable tests; orchestration policy outcome evidence is still partial. Planner remains a library-only no-op. |
-| 6 Gradio | BLOCKED | Record renderer tests pass, but Gradio is unavailable and network installation failed. App launch and HTTP/screenshot evidence are absent. See `docs/demo_checklist.md`. |
-| 7 PDF | BLOCKED | ReportLab is present, but neither pypdf nor pdfplumber is installed and network installation is unavailable. Required extracted-text, thumbnail, page-count, and stable-text checks have not been verified. |
-| 8 Batch/ZIP | PARTIAL | `tests/test_batch.py` passes 9 tests including streamed byte cap, traversal, symlink, nested zip, and mixed corrupt image handling. Disabling the streamed cap fails its test. UI wiring, deterministic cancellation, and worker-pool/inference-lock requirements remain incomplete. |
-| 9 Email | DONE (deleted) | `tests/test_email_absent.py` passes; README states email is not implemented and no email module exists. Removing that statement fails the test. |
-| 10 Evaluation | NOT EVALUATED | Git history unavailable; no preregistration order proof. Existing artifact is plumbing-only with identical verdict calls in both arms, and lacks the requested bootstrap CI/hard-subset comparison. |
-| 11 Docker/CI | BLOCKED | Docker CLI cannot connect to daemon; no clean-clone builds or run. CI was inspected but not executed. |
+| Environment and inference | DONE | `tests/test_pipeline.py::test_checkpoint_loads_in_a_clean_process`, `tests/test_inference_contract.py::TestPredictRaw::test_valid_image_returns_dict_with_expected_keys`; 100 tests passed overall. |
+| Tools and validation | DONE | `tests/test_agent_tools.py::test_inspect_image_success_failure_timeout`, `test_validate_prediction_success_failure_timeout`, `test_generate_ela_success_failure_timeout`, `test_inspect_metadata_success_failure_timeout`, `test_run_localizer_success_failure_timeout`, `test_compare_evidence_success_failure_timeout`; `tests/test_validate_prediction.py::TestValidatePredictionIntegration::test_mixed_validity`. |
+| Conditional policy / verdict evidence | DONE | `tests/test_agent_policy.py::test_conditional_evidence_changes_verdict`; three `synthetic_records()` images in `docs/agent_evidence.md` show verdict changes with full checks. |
+| App and Gradio | DONE | `tests/test_app_handler.py::test_analyze_uses_orchestrator_record_and_renders_verdict`, `tests/test_wiring.py::test_app_imports_orchestrator_and_is_single_gradio_entrypoint`; `docs/demo_checklist.md` records HTTP 200. |
+| PDF reporting | DONE | `tests/test_reporting.py::test_pdf_extracted_text_escaping_absent_exif_and_repeatability`, `test_pdf_300_char_filename_script_escape`, `test_pdf_no_exif_reports_absent`, `test_pdf_identical_record_same_text`; `docs/pdf_check.txt` records all three extraction checks as PASS. |
+| Batch and ZIP | DONE | `tests/test_batch.py::test_zip_slip_detection`, `test_symlink_member_rejection`, `test_nested_zip_detection`, `test_zip_bomb_byte_counting`, `test_streamed_uncompressed_byte_limit`, `test_mixed_valid_and_corrupt_batch_completes`, `test_cancellation_mid_batch`; `tests/test_wiring.py::test_gradio_app_wires_batch_zip_processor`. |
+| Email absence | DONE | `tests/test_email_absent.py::test_email_not_implemented_and_no_module_exists`. |
+| Hard-subset evaluation | NOT EVALUATED | `results/eval_run.txt` is labeled PLUMBING ONLY. No local real labeled re-encoded, low-contrast splice subset is identified; the preregistered comparison and bootstrap CI were not run. |
+| Docker image and container | DONE | Clean-clone build without checkpoint and rebuild with the trained checkpoint both completed; `docker run -p 7860:7860 deepfake-localizer` started and emitted the two lines recorded in `docs/docker_check.md`. |
+| CI workflow scope | PARTIAL | Workflow runs `ruff check src/ app/ tests/ scripts/ agent/` and `pytest tests/ -v`. Local Ruff and all tests passed, but pytest is configured to collect `tests/` only, not all five directories. |
 
-## Raw test and lint output
+## Raw pytest output
 
-Command: `/opt/homebrew/opt/python@3.11/bin/python3.11 -m pytest tests/ -q`
+Command: `source .venv311/bin/activate && python -m pytest tests/ -v`
 
 ```text
-97 passed, 2 warnings in 38.91s
+============================= test session starts ==============================
+platform darwin -- Python 3.11.17, pytest-9.1.1, pluggy-1.7.0 -- /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 100 items
+
+tests/test_agent_policy.py::test_uncertain_score_schedules_ela_and_metadata PASSED [  1%]
+tests/test_agent_policy.py::test_high_score_schedules_ela PASSED         [  2%]
+tests/test_agent_policy.py::test_origin_goal_schedules_metadata_but_non_origin_does_not PASSED [  3%]
+tests/test_agent_policy.py::test_conflict_schedules_compare_and_unresolved_is_inconclusive PASSED [  4%]
+tests/test_agent_policy.py::test_conditional_evidence_changes_verdict PASSED [  5%]
+tests/test_agent_policy.py::test_budget_two_attempts_exactly_two_calls PASSED [  6%]
+tests/test_agent_policy.py::test_invalid_inspect_is_inconclusive_without_localizer PASSED [  7%]
+tests/test_agent_tools.py::test_inspect_image_success_failure_timeout PASSED [  8%]
+tests/test_agent_tools.py::test_validate_prediction_success_failure_timeout PASSED [  9%]
+tests/test_agent_tools.py::test_generate_ela_success_failure_timeout PASSED [ 10%]
+tests/test_agent_tools.py::test_inspect_metadata_success_failure_timeout PASSED [ 11%]
+tests/test_agent_tools.py::test_run_localizer_success_failure_timeout PASSED [ 12%]
+tests/test_agent_tools.py::test_compare_evidence_success_failure_timeout PASSED [ 13%]
+tests/test_app_handler.py::test_analyze_uses_orchestrator_record_and_renders_verdict PASSED [ 14%]
+tests/test_batch.py::test_zip_slip_detection PASSED                      [ 15%]
+tests/test_batch.py::test_zip_bomb_byte_counting PASSED                  [ 16%]
+tests/test_batch.py::test_symlink_member_rejection PASSED                [ 17%]
+tests/test_batch.py::test_mixed_valid_and_corrupt_batch_completes PASSED [ 18%]
+tests/test_batch.py::test_cancellation_mid_batch PASSED                  [ 19%]
+tests/test_batch.py::test_nested_zip_detection PASSED                    [ 20%]
+tests/test_batch.py::test_max_zip_stream_bytes PASSED                    [ 21%]
+tests/test_batch.py::test_streamed_uncompressed_byte_limit PASSED        [ 22%]
+tests/test_batch.py::test_absolute_zip_path_rejected PASSED              [ 23%]
+tests/test_ela.py::test_preserves_size_and_mode PASSED                   [ 24%]
+tests/test_ela.py::test_flags_spliced_region PASSED                      [ 25%]
+tests/test_ela.py::test_array_shape_and_range PASSED                     [ 26%]
+tests/test_ela.py::test_accepts_numpy_and_path PASSED                    [ 27%]
+tests/test_ela.py::test_flat_image_does_not_blow_up PASSED               [ 28%]
+tests/test_ela.py::test_fixed_scale_is_deterministic PASSED              [ 29%]
+tests/test_email_absent.py::test_email_not_implemented_and_no_module_exists PASSED [ 30%]
+tests/test_gradio.py::test_verdict_no_authentic PASSED                   [ 31%]
+tests/test_gradio.py::test_all_four_verdicts_present PASSED              [ 32%]
+tests/test_gradio.py::test_summary_contains_uncalibrated_label PASSED    [ 33%]
+tests/test_gradio.py::test_summary_numeric_parser_rejects_unstored_number PASSED [ 34%]
+tests/test_gradio.py::test_record_renderer_escapes_untrusted_content_and_shows_verdict PASSED [ 35%]
+tests/test_gradio.py::test_escaping_handles_script_tags PASSED           [ 36%]
+tests/test_gradio.py::test_verdict_decision_scenarios PASSED             [ 37%]
+tests/test_inference_contract.py::TestPredictRaw::test_valid_image_returns_dict_with_expected_keys PASSED [ 38%]
+tests/test_inference_contract.py::TestPredictRaw::test_tampered_image_has_nonzero_prob PASSED [ 39%]
+tests/test_inference_contract.py::TestPredictRaw::test_predict_raw_no_threshold_applied PASSED [ 40%]
+tests/test_inference_contract.py::TestPredict::test_predict_uses_provided_threshold PASSED [ 41%]
+tests/test_inference_contract.py::TestPredict::test_predict_defaults_to_config_threshold PASSED [ 42%]
+tests/test_inference_contract.py::TestPredict::test_predict_no_threshold_on_authentic PASSED [ 43%]
+tests/test_inference_contract.py::TestPredict::test_predict_no_threshold_on_tampered PASSED [ 44%]
+tests/test_inference_contract.py::TestPredict::test_predict_returns_bounding_box_when_tampered PASSED [ 45%]
+tests/test_inference_contract.py::TestPredict::test_predict_bbox_none_when_authentic PASSED [ 46%]
+tests/test_inference_contract.py::TestEdgeCases::test_corrupt_image_clean_error PASSED [ 47%]
+tests/test_inference_contract.py::TestEdgeCases::test_unsupported_extension PASSED [ 48%]
+tests/test_inference_contract.py::TestEdgeCases::test_tiny_image_1x1 PASSED [ 49%]
+tests/test_inference_contract.py::TestEdgeCases::test_very_large_image PASSED [ 50%]
+tests/test_inference_contract.py::TestEdgeCases::test_malformed_model_output_rejected PASSED [ 51%]
+tests/test_inference_contract.py::TestEdgeCases::test_threshold_not_written_to_shared_state PASSED [ 52%]
+tests/test_inspect_image.py::TestInspectImageSuccess::test_valid_png_image PASSED [ 53%]
+tests/test_inspect_image.py::TestInspectImageSuccess::test_sha256_is_64_chars PASSED [ 54%]
+tests/test_inspect_image.py::TestInspectImageFailure::test_nonexistent_file PASSED [ 55%]
+tests/test_inspect_image.py::TestInspectImageFailure::test_empty_string_path PASSED [ 56%]
+tests/test_inspect_image.py::TestInspectImageWithPath::test_with_path_object PASSED [ 57%]
+tests/test_inspect_image.py::TestInspectImageWithPath::test_path_object_direct PASSED [ 58%]
+tests/test_inspect_image.py::TestInspectImageEdgeCases::test_small_image_no_crash PASSED [ 59%]
+tests/test_inspect_image.py::TestInspectImageEdgeCases::test_digest_matches_file_bytes PASSED [ 60%]
+tests/test_model.py::test_output_shapes PASSED                           [ 61%]
+tests/test_model.py::test_label_output_range PASSED                      [ 62%]
+tests/test_model.py::test_bbox_output_range PASSED                       [ 63%]
+tests/test_model.py::test_bbox_never_degenerate PASSED                   [ 64%]
+tests/test_model.py::test_corner_center_roundtrip PASSED                 [ 65%]
+tests/test_model.py::test_masked_bbox_loss_authentic_zero PASSED         [ 66%]
+tests/test_model.py::test_masked_bbox_loss_tampered_positive PASSED      [ 67%]
+tests/test_model.py::test_masked_bbox_loss_perfect_prediction_zero PASSED [ 68%]
+tests/test_model.py::test_mixed_batch_loss PASSED                        [ 69%]
+tests/test_model.py::test_model_serialization PASSED                     [ 70%]
+tests/test_model.py::test_six_channel_input_required PASSED              [ 71%]
+tests/test_pipeline.py::test_training_writes_artifacts PASSED            [ 72%]
+tests/test_pipeline.py::test_test_split_is_held_out PASSED               [ 73%]
+tests/test_pipeline.py::test_checkpoint_loads_in_a_clean_process PASSED  [ 74%]
+tests/test_pipeline.py::test_evaluate_produces_metrics_and_plots PASSED  [ 75%]
+tests/test_pipeline.py::test_inference_on_single_image PASSED            [ 76%]
+tests/test_reporting.py::test_pdf_300_char_filename_script_escape PASSED [ 77%]
+tests/test_reporting.py::test_pdf_no_exif_reports_absent PASSED          [ 78%]
+tests/test_reporting.py::test_pdf_thumbnail_for_large_image PASSED       [ 79%]
+tests/test_reporting.py::test_pdf_multi_page_record PASSED               [ 80%]
+tests/test_reporting.py::test_pdf_identical_record_same_text PASSED      [ 81%]
+tests/test_reporting.py::test_escape_text PASSED                         [ 82%]
+tests/test_reporting.py::test_pdf_extracted_text_escaping_absent_exif_and_repeatability PASSED [ 83%]
+tests/test_validate_prediction.py::TestValidatePredictionSuccess::test_valid_score_and_bbox PASSED [ 84%]
+tests/test_validate_prediction.py::TestValidatePredictionSuccess::test_authentic_with_no_bbox PASSED [ 85%]
+tests/test_validate_prediction.py::TestValidatePredictionSuccess::test_zero_score_authentic PASSED [ 86%]
+tests/test_validate_prediction.py::TestValidatePredictionSuccess::test_full_score_tampered PASSED [ 87%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_nan_score PASSED [ 88%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_score_above_one PASSED [ 89%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_score_below_zero PASSED [ 90%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_inverted_bbox_x PASSED [ 91%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_inverted_bbox_y PASSED [ 92%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_bbox_out_of_range_xmin PASSED [ 93%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_bbox_out_of_range_xmax PASSED [ 94%]
+tests/test_validate_prediction.py::TestValidatePredictionFailure::test_bbox_zero_area PASSED [ 95%]
+tests/test_validate_prediction.py::TestValidatePredictionAreaCoverage::test_box_area_below_minimum PASSED [ 96%]
+tests/test_validate_prediction.py::TestValidatePredictionAreaCoverage::test_box_covers_too_much PASSED [ 97%]
+tests/test_validate_prediction.py::TestValidatePredictionIntegration::test_mixed_validity PASSED [ 98%]
+tests/test_wiring.py::test_app_imports_orchestrator_and_is_single_gradio_entrypoint PASSED [ 99%]
+tests/test_wiring.py::test_gradio_app_wires_batch_zip_processor PASSED   [100%]
+
+=============================== warnings summary ===============================
+tests/test_model.py::test_model_serialization
+  /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main/.venv311/lib/python3.11/site-packages/keras/src/saving/saving_lib.py:869: UserWarning: Skipping variable loading for optimizer 'adam', because it has 46 variables whereas the saved optimizer has 2 variables. 
+    saveable.load_own_variables(store)
+
+tests/test_pipeline.py::test_training_writes_artifacts
+  /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main/.venv311/lib/python3.11/site-packages/keras/src/trainers/epoch_iterator.py:74: UserWarning: `shuffle=True` was passed, but will be ignored since the data `x` was provided as a tf.data.Dataset. The Dataset is expected to already be shuffled (via `.shuffle(buffer_size)`).
+    self.data_adapter = data_adapters.get_data_adapter(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 100 passed, 2 warnings in 43.17s =======================
 ```
 
-Warnings: Keras skipped optimizer variable loading during model serialization; Keras ignored `shuffle=True` for a `tf.data.Dataset` input.
+## Raw Ruff output
 
-Command: `/opt/homebrew/bin/ruff check src/ app/ tests/ scripts/ agent/`
+Command: `source .venv311/bin/activate && ruff check src/ app/ tests/ scripts/ agent/`
 
 ```text
 All checks passed!
 ```
 
-## Mutation results
+## Git log
 
-All mutations listed below were temporary and restored before final tests.
+Command: `git log --oneline -- docs/evaluation.md results/`
 
-| Behavior mutation | Test | Result |
-|---|---|---|
-| Escape helper returns input unchanged | `test_escaping_handles_script_tags` | Caught: 1 failed; restored: 1 passed |
-| Image digest becomes 64 zeroes | `test_digest_matches_file_bytes` | Caught: 1 failed; restored: 1 passed |
-| Remove app orchestrator import | `test_app_imports_orchestrator_and_is_single_gradio_entrypoint` | Caught: 1 failed; restored: 1 passed |
-| Disable uncertain-score policy trigger | `test_uncertain_score_schedules_ela_and_metadata` | Caught: 1 failed; restored policy test passed |
-| Numeric checker always returns true | `test_summary_numeric_parser_rejects_unstored_number` | Caught: 1 failed; restored: 1 passed |
-| Disable ZIP streamed-byte guard | `test_streamed_uncompressed_byte_limit` | Caught: 1 failed; restored: 1 passed |
-| Change README email status to available | `test_email_not_implemented_and_no_module_exists` | Caught: 1 failed; restored: 1 passed |
-| Renderer escaping returns untrusted input unchanged | `test_record_renderer_escapes_untrusted_content_and_shows_verdict` | Caught: 1 failed; restored: 1 passed |
-
-## Wiring table
-
-The entrypoint is `app/app.py` per Dockerfile and README. Static search found one Gradio construction and one launch. The orchestrator is imported by the app but not called; imported dependencies are therefore not yet part of the app's investigation flow.
-
-| Module | App import | Status |
-|---|---|---|
-| `agent/batch.py` | No | LIBRARY ONLY |
-| `agent/config.py` | Yes, transitively | Loaded through orchestrator; not used for app inference |
-| `agent/orchestrator.py` | Yes | Imported but not invoked |
-| `agent/planner.py` | No | LIBRARY ONLY; unimplemented proposal behavior |
-| `agent/policy.py` | Yes, transitively | Loaded through orchestrator; unit-tested policy path |
-| `agent/rendering.py` | Yes | WIRED helper; record renderer separately tested |
-| `agent/reporting.py` | No | LIBRARY ONLY |
-| `agent/schemas.py` | Yes | WIRED |
-| `agent/summary.py` | No | LIBRARY ONLY |
-| `agent/tool_registry.py` | Yes, transitively | Loaded through orchestrator; not called by app |
-| `agent/tools/common.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/tools/compare_evidence.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/tools/generate_ela.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/tools/inspect_image.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/tools/inspect_metadata.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/tools/run_localizer.py` | Yes, transitively | Loaded through registry; tests inject `predict_raw` detector |
-| `agent/tools/validate_prediction.py` | Yes, transitively | Loaded through registry; tool tests pass |
-| `agent/verdict.py` | Yes | WIRED |
-| `scripts/download_data.py` | No | LIBRARY/CLI ONLY |
-| `scripts/evaluate_agent.py` | No | LIBRARY/CLI ONLY |
-| `scripts/make_plan_pdf.py` | No | LIBRARY/CLI ONLY |
-
-## Phase 10 and Docker
-
-Phase 10 is **NOT EVALUATED**. The evaluation amendment states the requested 5 percentage point target with a 95% bootstrap confidence interval and fixed seed, but cannot be called pre-registered without Git history. Existing synthetic values reproduce as 0.00% baseline, 0.00% policy, and 0.00 percentage-point improvement; both arms call the same `decide()` function, so they are not a policy-versus-baseline experiment. Synthetic data is a plumbing check, not evidence about real forgeries.
-
-Docker status: **NOT VERIFIED**. `docker build -t deepfake-localizer:forensic-audit .` failed because the Docker daemon socket does not exist. Clean-clone builds with and without a checkpoint and `docker run` were not performed.
-
-## System label
-
-**deterministic conditional pipeline**
-
-One synthetic fixture shows a comparison changing a verdict, but the required three distinct image-backed outcome cases are not available in `docs/agent_evidence.md`. Do not call the system agentic.
+```text
+ea7a3273 Record synthetic evaluation plumbing run
+396756fe Pre-register hard-subset evaluation criterion
+48d31e70 baseline before verification
+```
