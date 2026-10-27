@@ -77,9 +77,10 @@ class AgentResult:
     messages: list[dict[str, Any]]
     record: InvestigationRecord
     steps: int
-    stopped_reason: str  # final_answer | max_steps | model_unavailable
+    stopped_reason: str  # final_answer | max_steps | model_unavailable | retry_limit
     grounded_verdict: Verdict | None = None
     errors: list[str] = field(default_factory=list)
+    confidence: str = "low"
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +280,82 @@ def _execute(tool_call: Any, ctx: ToolContext, record: InvestigationRecord) -> d
     return payload
 
 
+def _reflection_enabled(config: dict[str, Any]) -> bool:
+    """Return whether the optional answer review is enabled."""
+    return bool(config.get("reflection", False))
+
+
+def reflect(answer: str, messages: list[dict[str, Any]], client: Any, model: str) -> str:
+    """Review the answer against tool evidence; accept only explicit corrections."""
+    check = (
+        "Review your verdict against the tool results above. If it contradicts the evidence, "
+        "reply with CORRECTED: followed by the corrected answer. Otherwise reply with OK."
+    )
+    review_messages = [*copy.deepcopy(messages), {"role": "user", "content": check}]
+    response = client.chat.completions.create(model=model, messages=review_messages)
+    text = str(getattr(response.choices[0].message, "content", None) or "")
+    if "CORRECTED:" not in text:
+        return answer
+    return text.split("CORRECTED:", 1)[1].strip() or answer
+
+
+def _model_verdict(answer: str) -> Verdict | None:
+    """Read only clear verdict language from the answer, without guessing."""
+    text = answer.casefold()
+    if any(
+        term in text
+        for term in ("not tampered", "not manipulated", "not flagged", "no manipulation")
+    ):
+        return Verdict.NOT_FLAGGED_BY_THIS_DETECTOR
+    if "inconclusive" in text or "unable to determine" in text:
+        return Verdict.INCONCLUSIVE
+    if "tampered" in text or "manipulated" in text or "flagged" in text:
+        return Verdict.FLAGGED_FOR_REVIEW
+    return None
+
+
+def _assess_answer(
+    answer: str, record: InvestigationRecord, grounded: Verdict
+) -> tuple[str, str]:
+    """Append computed review/confidence guidance from recorded evidence."""
+    from agent.config import get_config
+
+    clean_lines = [
+        line for line in answer.splitlines()
+        if not line.startswith("Needs human review:")
+        and line not in {"Confidence: low.", "Confidence: medium.", "Confidence: high."}
+    ]
+    answer = "\n".join(clean_lines).rstrip()
+    settings = get_config().get("forensics", {})
+    low = float(settings.get("uncertain_low", 0.4))
+    high = float(settings.get("uncertain_high", 0.6))
+    reasons: list[str] = []
+    score = None
+    validation_issues = False
+    for observation in record.observations:
+        result = observation.result or {}
+        if observation.tool == "run_localizer":
+            value = result.get("tampered_prob", result.get("score"))
+            if isinstance(value, (int, float)):
+                score = float(value)
+        elif observation.tool == "validate_prediction" and result.get("issues"):
+            validation_issues = True
+    if score is not None and low <= score <= high:
+        reasons.append(f"the localizer score {score:.4f} is in the uncertain range")
+    if any(item.status in ("error", "timeout") for item in record.observations):
+        reasons.append("a required tool failed")
+    if validation_issues:
+        reasons.append("validate_prediction reported issues")
+    stated = _model_verdict(answer)
+    if stated is not None and stated != grounded:
+        reasons.append("the stated verdict disagrees with the evidence-based verdict")
+    confidence = "low" if reasons else "high" if score is not None else "medium"
+    if reasons:
+        answer += "\n\nNeeds human review: " + "; ".join(reasons) + "."
+    answer += f"\n\nConfidence: {confidence}."
+    return answer, confidence
+
+
 # ---------------------------------------------------------------------------
 # The loop
 # ---------------------------------------------------------------------------
@@ -319,18 +396,20 @@ def run_agent_full(
             memory_path, key, endpoints[0]["model"], record.threshold, config_hash
         )
         if saved is not None:
-            messages.append({"role": "assistant", "content": saved.answer})
             verdict, reasons = decide(saved.record)
             saved.record.verdict = verdict
             saved.record.verdict_reasons = reasons
+            cached_answer, confidence = _assess_answer(saved.answer, saved.record, verdict)
+            messages.append({"role": "assistant", "content": cached_answer})
             return AgentResult(
-                answer=saved.answer,
+                answer=cached_answer,
                 messages=copy.deepcopy(messages),
                 record=saved.record,
                 steps=0,
                 stopped_reason="final_answer",
                 grounded_verdict=verdict,
                 errors=list(saved.record.errors),
+                confidence=confidence,
             )
 
     endpoint_index = 0
@@ -339,6 +418,8 @@ def run_agent_full(
     answer = ""
     stopped_reason = "final_answer"
     active = client
+    identical_calls: dict[str, int] = {}
+    retry_limit_reached = False
 
     if active is None:
         try:
@@ -393,12 +474,37 @@ def run_agent_full(
         if not calls:
             answer = str(getattr(message, "content", None) or "")
             messages.append(_assistant_message(message))
+            if _reflection_enabled(config):
+                try:
+                    answer = reflect(answer, messages, active, endpoint["model"])
+                except Exception as exc:
+                    record.errors.append(f"reflection failed: {type(exc).__name__}")
             stopped_reason = "final_answer"
             break
 
         messages.append(_assistant_message(message))
         for index, call in enumerate(calls):
-            payload = _execute(call, ctx, record)
+            try:
+                parsed = json.loads(_tool_arguments(call) or "{}")
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            key_call = None
+            if isinstance(parsed, dict):
+                key_call = json.dumps(
+                    [_tool_name(call), parsed], sort_keys=True, separators=(",", ":")
+                )
+                identical_calls[key_call] = identical_calls.get(key_call, 0) + 1
+            retry_cap = int(config.get("max_identical_retries", 2))
+            if key_call is not None and identical_calls[key_call] > retry_cap:
+                payload = {
+                    "error": "retry limit reached; change the arguments or use another tool",
+                    "hint": "select a different tool or provide different arguments",
+                }
+                _observe(record, _tool_name(call), parsed, payload, "error")
+                _log_tool_call(_tool_name(call), parsed, payload, "error")
+                retry_limit_reached = True
+            else:
+                payload = _execute(call, ctx, record)
             messages.append(
                 {
                     "role": "tool",
@@ -406,11 +512,20 @@ def run_agent_full(
                     "content": json.dumps(payload, default=str),
                 }
             )
+        if retry_limit_reached:
+            answer = "Stopped: the identical tool-call retry limit was reached."
+            stopped_reason = "retry_limit"
+            break
 
     verdict, reasons = decide(record)
     record.verdict = verdict
     record.verdict_reasons = reasons
     record.rationale = "; ".join(reasons)
+    confidence = "low"
+    if stopped_reason == "final_answer":
+        answer, confidence = _assess_answer(answer, record, verdict)
+        if messages and messages[-1].get("role") == "assistant":
+            messages[-1]["content"] = answer
     if key and stopped_reason == "final_answer":
         save_investigation(
             memory_path,
@@ -429,6 +544,7 @@ def run_agent_full(
         stopped_reason=stopped_reason,
         grounded_verdict=verdict,
         errors=list(record.errors),
+        confidence=confidence,
     )
 
 

@@ -9,7 +9,8 @@ The prompt is deliberately free of a fixed tool sequence. It tells the model
 what the job is, how to behave when evidence conflicts, what the tools cannot
 do, and how to write the final answer -- the model picks the calls itself.
 
-Nothing here mentions a failure/fallback rule; that arrives in a later step.
+Tool failures include a concrete fallback instruction so the agent can keep
+investigating when one evidence source is unavailable.
 """
 
 from __future__ import annotations
@@ -39,6 +40,9 @@ Working rules
   is evidence you cannot cite.
 - If a result carries an "error", do not repeat that call unchanged. Adjust the
   arguments or switch to a different tool that can answer the same question.
+- If run_localizer fails, continue with generate_ela and inspect_metadata when
+  they can still help answer the question. Report the failure and name the
+  tools that remain usable.
 - Stop once the evidence agrees with itself, or when no remaining tool could
   add information. An established partial picture beats an unbounded series of
   speculative calls.

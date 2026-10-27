@@ -85,6 +85,7 @@ def test_followup_reuses_history_without_another_tool_call(tmp_path, monkeypatch
         ]
     )
     _answer, history = loop.run_agent("quick_check", str(image), client=first_client)
+    assert any("0.73" in str(item.get("content", "")) for item in history), history
     second_client = FakeClient([make_message(content="The confidence was 0.73.")])
 
     answer, _ = loop.run_agent(
@@ -92,13 +93,13 @@ def test_followup_reuses_history_without_another_tool_call(tmp_path, monkeypatch
         use_memory=False,
     )
 
-    assert answer == "The confidence was 0.73."
+    assert answer.startswith("The confidence was 0.73.")
     assert len(second_client.requests) == 1
     request_messages = second_client.requests[0]["messages"]
     assert any(
-        str(item.get("content", "")).startswith("Confidence: 0.73")
+        "0.73" in str(item.get("content", ""))
         for item in request_messages
-    )
+    ), request_messages
     previous_tools = len(tool_messages({"messages": history}))
     assert len(tool_messages(second_client.requests[0])) == previous_tools
 

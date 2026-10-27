@@ -60,13 +60,15 @@ def test_direct_final_answer_returns_text_and_messages(image):
 
     answer, messages = loop.run_agent("quick_check", str(image), client=client)
 
-    assert answer == "Verdict: nothing to flag."
+    assert answer.startswith("Verdict: nothing to flag.")
+    assert "Confidence: medium." in answer
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
     user_turn = next(item for item in reversed(messages) if item["role"] == "user")
     assert "quick_check" in user_turn["content"]
     assert str(image) in user_turn["content"]
-    assert messages[-1] == {"role": "assistant", "content": "Verdict: nothing to flag."}
+    assert messages[-1]["role"] == "assistant"
+    assert messages[-1]["content"] == answer
     assert len(client.requests) == 1
 
 
@@ -85,7 +87,7 @@ def test_tool_result_reaches_the_next_request(image):
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
-    assert answer == "Two of two."
+    assert answer.startswith("Two of two.")
     assert len(client.requests) == 2
 
     # The full history is resent: system, user, assistant(tool_calls), tool.
@@ -141,7 +143,7 @@ def test_malformed_json_arguments_are_answered_and_the_loop_continues(image):
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
-    assert answer == "recovered"
+    assert answer.startswith("recovered")
     assert len(client.requests) == 2
 
     payload = json.loads(tool_messages(client.requests[1])[0]["content"])
@@ -161,7 +163,7 @@ def test_non_object_json_arguments_are_treated_as_malformed(image):
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
-    assert answer == "recovered"
+    assert answer.startswith("recovered")
     payload = json.loads(tool_messages(client.requests[1])[0]["content"])
     assert "invalid JSON arguments" in payload["error"]
 
@@ -173,7 +175,15 @@ def test_non_object_json_arguments_are_treated_as_malformed(image):
 
 def test_always_tool_fake_stops_at_max_steps(image):
     responses = [
-        make_message(tool_calls=[_inspect_call(image, call_id=f"call_{i}")])
+        make_message(
+            tool_calls=[
+                make_tool_call(
+                    "inspect_image",
+                    {"image_path": str(image.with_name(f"photo_{i}.png"))},
+                    call_id=f"call_{i}",
+                )
+            ]
+        )
         for i in range(10)
     ]
     client = FakeClient(responses)
@@ -189,7 +199,15 @@ def test_always_tool_fake_stops_at_max_steps(image):
 def test_step_limit_comes_from_config_when_not_supplied(image):
     configured = int(get_agent_config()["max_steps"])
     responses = [
-        make_message(tool_calls=[_inspect_call(image, call_id=f"call_{i}")])
+        make_message(
+            tool_calls=[
+                make_tool_call(
+                    "inspect_image",
+                    {"image_path": str(image.with_name(f"photo_{i}.png"))},
+                    call_id=f"call_{i}",
+                )
+            ]
+        )
         for i in range(20)
     ]
     client = FakeClient(responses)
@@ -218,7 +236,7 @@ def test_provider_errors_retries_then_falls_back_to_the_next_model(image):
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
-    assert answer == "ok from the fallback"
+    assert answer.startswith("ok from the fallback")
     models = [request["model"] for request in client.requests]
     # Three failed attempts against the primary (attempt + two retries), then
     # the switch to the fallback model succeeds.
@@ -301,7 +319,7 @@ def test_grounding_keeps_the_model_text_and_computes_the_verdict(image):
     result = loop.run_agent_full("quick_check", str(image), client=client)
 
     # The model's words are untouched; the verdict is computed alongside.
-    assert result.answer == "The image looks fine to me."
+    assert result.answer.startswith("The image looks fine to me.")
     assert isinstance(result.grounded_verdict, Verdict)
     assert result.record.verdict == result.grounded_verdict
     assert result.stopped_reason == "final_answer"
