@@ -21,7 +21,11 @@ def _planner_instance(planner):
         return None
     if planner is not None:
         return planner
-    if not os.environ.get("ANTHROPIC_API_KEY") or not os.environ.get("ANTHROPIC_MODEL"):
+    if (
+        not os.environ.get("ANTHROPIC_API_KEY")
+        or not os.environ.get("ANTHROPIC_MODEL")
+        or not os.environ.get("ANTHROPIC_BASE_URL")
+    ):
         return None
     from agent.planner import AnthropicPlanner
 
