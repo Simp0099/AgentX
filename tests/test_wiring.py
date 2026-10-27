@@ -7,7 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_app_imports_orchestrator_and_is_single_gradio_entrypoint():
     app_text = (ROOT / "app" / "app.py").read_text()
-    assert "from agent import orchestrator" in app_text
+    handler_text = (ROOT / "app" / "handler.py").read_text()
+    assert "from app.handler import analyze" in app_text
+    assert "from agent.orchestrator import run_investigation" in handler_text
     gradio_apps = []
     for path in ROOT.rglob("*.py"):
         if any(part.startswith(".") for part in path.parts):

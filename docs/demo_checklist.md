@@ -1,7 +1,24 @@
-# Demo checklist
+# Gradio demo verification
 
-Status: **BLOCKED — runtime launch not performed**.
+## Launch command
 
-Evidence: the current Python 3.11 environment has no `gradio` module (`find_spec("gradio")` returned false). Installing it in `.venv311` failed because DNS/network access to `pypi.org` is unavailable. The app import and HTTP response/screenshot therefore cannot be truthfully reported. Static check finds the single Blocks construction and launch in `app/app.py`; this is not a runtime verification.
+Command: `python app/app.py` (a temporary PATH shim resolves `python` to Python 3.11.17).
 
-Record renderer test command: `python3.11 -m pytest tests/test_gradio.py::test_record_renderer_escapes_untrusted_content_and_shows_verdict -q` → 1 passed. Mutation replacing escaping with identity → 1 failed; restored implementation → 1 passed.
+```text
+Traceback (most recent call last):
+  File "app/app.py", line 9, in <module>
+    import gradio as gr
+ModuleNotFoundError: No module named 'gradio'
+```
+
+The app exited with status 1 before opening the listener.
+
+## HTTP request
+
+Command: `curl -i --max-time 3 http://localhost:7860`
+
+```text
+curl: (7) Failed to connect to localhost port 7860 after 0 ms: Couldn't connect to server
+```
+
+HTTP status line: **none** (connection refused; server did not start). Response body: **none**. Therefore the UI handler test passes, but live Gradio behavior is not verified in this environment.

@@ -16,13 +16,14 @@ def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     obs = _observations(record)
     by_tool = {item.tool: item for item in obs}
     done = set(by_tool)
+    image_path = record.image_id
     if "inspect_image" not in done:
-        return [[ToolCall("inspect_image", {"path": record.filename})]]
+        return [[ToolCall("inspect_image", {"path": image_path})]]
     inspected = by_tool["inspect_image"].result or {}
     if not inspected.get("valid", True):
         return []
     if "run_localizer" not in done:
-        return [[ToolCall("run_localizer", {"path": record.filename,
+        return [[ToolCall("run_localizer", {"path": image_path,
                                              "threshold": record.threshold})]]
     localizer = by_tool["run_localizer"].result or {}
     score = localizer.get("tampered_prob")
@@ -36,9 +37,9 @@ def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     goal = f"{record.goal} {record.goal_text}".lower()
     origin = any(word in goal for word in ("origin", "source", "camera", "editing", "history"))
     if (uncertain or flagged) and "generate_ela" not in done:
-        return [[ToolCall("generate_ela", {"path": record.filename})]]
+        return [[ToolCall("generate_ela", {"path": image_path})]]
     if (uncertain or origin) and "inspect_metadata" not in done:
-        return [[ToolCall("inspect_metadata", {"path": record.filename})]]
+        return [[ToolCall("inspect_metadata", {"path": image_path})]]
     if "validate_prediction" not in done:
         return [[ToolCall("validate_prediction", {
             "raw_score": score, "bbox": localizer.get("bbox"),
@@ -48,9 +49,9 @@ def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     validation = by_tool["validate_prediction"].result or {}
     conflict = (flagged and not validation.get("valid", False)) or uncertain
     if conflict and "generate_ela" not in done:
-        return [[ToolCall("generate_ela", {"path": record.filename})]]
+        return [[ToolCall("generate_ela", {"path": image_path})]]
     if conflict and "inspect_metadata" not in done:
-        return [[ToolCall("inspect_metadata", {"path": record.filename})]]
+        return [[ToolCall("inspect_metadata", {"path": image_path})]]
     if conflict and "compare_evidence" not in done:
         return [[ToolCall("compare_evidence", {"record": record})]]
     return []

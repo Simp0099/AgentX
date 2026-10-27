@@ -24,6 +24,7 @@ def run_investigation(
     goal_text: str = "",
     config: dict | None = None,
     planner=None,
+    detector=None,
 ) -> InvestigationRecord:
     """Run a bounded forensic investigation.
 
@@ -77,6 +78,8 @@ def run_investigation(
         """
         tool_name = tool_call.tool
         args = tool_call.args.copy()
+        if tool_name == "run_localizer" and detector is not None:
+            args["detector"] = detector
 
         # The orchestrator supplies the image path; the LLM never does.
         # Sanitise: ensure "path" is not an absolute or suspicious path.
