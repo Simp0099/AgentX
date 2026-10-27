@@ -1,0 +1,40 @@
+# Data — exclude everything except a README documenting how to get it
+data/*
+!data/README.md
+
+# Trained models / training artifacts
+checkpoints/*
+!checkpoints/.gitkeep
+*.keras
+*.h5
+*.weights.*
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+logs/
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets / credentials
+kaggle.json
+.env
+*.pem
+
+# Misc
+*.zip

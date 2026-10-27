@@ -1,0 +1,17 @@
+# Core
+tensorflow==2.21.0
+numpy>=2.0
+Pillow>=10.0
+PyYAML>=6.0
+scikit-learn>=1.5
+matplotlib>=3.8
+
+# Demo app
+gradio>=5.0
+
+# PDF reporting (agent/reporting.py and tests/test_reporting.py)
+reportlab>=4.0
+
+# Dev / CI
+pytest>=8.0
+ruff>=0.6

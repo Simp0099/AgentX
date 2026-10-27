@@ -1,0 +1,28 @@
+[project]
+name = "deepfake-tampering-localizer"
+version = "0.1.0"
+description = "Classify whether an image was manipulated and localize the tampered region"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E402: app.py and evaluate.py must set sys.path / the matplotlib backend before
+#       importing, so module-level imports legitimately come after code.
+# B008:  Gradio component defaults in function signatures.
+ignore = ["E402", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# E501: tests build InvestigationRecord/Observation fixtures as single-line
+#       literals; wrapping dozens of fixture lines adds churn without value.
+#       Production code (agent/, scripts/, app/, src/) stays at 100 columns.
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
