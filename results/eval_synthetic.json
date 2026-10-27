@@ -30,5 +30,9 @@
     "pipeline": "deterministic via agent.verdict.decide",
     "records": "synthetic with re-encoding and low-contrast manipulations",
     "scope_note": "plumbing check only; both arms call the same decide() function, no model inference, not evidence about real forgeries"
-  }
+  },
+  "evaluation_status": "PLUMBING ONLY",
+  "criterion_status": "NOT EVALUATED",
+  "criterion_status_reason": "No locally labeled real subset identifies tampered images that are both re-encoded and low-contrast; synthetic records do not satisfy the criterion.",
+  "statistical_method_status": "NOT RUN: no real labeled hard-subset comparison; the bootstrap confidence interval is not estimable from this plumbing run."
 }
