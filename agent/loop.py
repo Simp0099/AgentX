@@ -26,6 +26,7 @@ labelled fallback and is untouched by this module.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -38,6 +39,8 @@ from typing import Any
 
 from agent.agent_config import get_agent_config, model_entries
 from agent.agent_tools import TOOL_SCHEMAS, ToolContext, run_tool
+from agent.memory import trim_messages
+from agent.memory_store import image_hash, load_investigation, save_investigation
 from agent.prompts import SYSTEM_PROMPT, build_user_message
 from agent.schemas import InvestigationRecord, Observation, Verdict
 from agent.verdict import decide
@@ -116,13 +119,20 @@ def _build_client(endpoint: dict[str, Any]) -> Any:
     )
 
 
-def _initial_messages(goal: str, image_path: str, history: list | None) -> list[dict[str, Any]]:
+def _initial_messages(
+    goal: str, image_path: str, history: list | None, config: dict[str, Any]
+) -> list[dict[str, Any]]:
     """System prompt, prior exchanges, then this investigation's user turn."""
     messages: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
-        messages.extend(dict(item) for item in history)
+        messages.extend(dict(item) for item in history if item.get("role") != "system")
     messages.append({"role": "user", "content": build_user_message(goal, image_path)})
-    return messages
+    limits = config.get("history", {})
+    return trim_messages(
+        messages,
+        int(limits.get("max_messages", 20)),
+        int(limits.get("max_chars", 12000)),
+    )
 
 
 def _call_id(tool_call: Any, index: int) -> str:
@@ -280,6 +290,7 @@ def run_agent_full(
     history: list[dict[str, Any]] | None = None,
     max_steps: int | None = None,
     client: Any | None = None,
+    use_memory: bool = True,
 ) -> AgentResult:
     """Run one conversation to completion and return everything it produced."""
     config = get_agent_config()
@@ -287,9 +298,40 @@ def run_agent_full(
     limit = int(config["max_steps"] if max_steps is None else max_steps)
     temperature = float(config["temperature"])
 
-    messages = _initial_messages(goal, image_path, history)
+    messages = _initial_messages(goal, image_path, history, config)
     record = _new_record(goal, image_path)
     ctx = ToolContext(upload_root=_upload_root(), threshold=_default_threshold())
+
+    config_hash = hashlib.sha256(
+        json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    memory = config.get("memory", {})
+    memory_path = str(memory.get("path", "artifacts/memory/investigations.db"))
+    # A follow-up belongs to the active conversation and should be answered
+    # from its history, not short-circuited by the per-image cache.
+    memory_enabled = use_memory and bool(memory.get("enabled", True)) and not history
+    try:
+        key = image_hash(image_path) if memory_enabled else ""
+    except OSError:
+        key = ""
+    if key:
+        saved = load_investigation(
+            memory_path, key, endpoints[0]["model"], record.threshold, config_hash
+        )
+        if saved is not None:
+            messages.append({"role": "assistant", "content": saved.answer})
+            verdict, reasons = decide(saved.record)
+            saved.record.verdict = verdict
+            saved.record.verdict_reasons = reasons
+            return AgentResult(
+                answer=saved.answer,
+                messages=copy.deepcopy(messages),
+                record=saved.record,
+                steps=0,
+                stopped_reason="final_answer",
+                grounded_verdict=verdict,
+                errors=list(saved.record.errors),
+            )
 
     endpoint_index = 0
     retries = 0
@@ -314,7 +356,7 @@ def run_agent_full(
         try:
             response = active.chat.completions.create(
                 model=endpoint["model"],
-                messages=messages,
+                messages=copy.deepcopy(messages),
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
                 temperature=temperature,
@@ -350,6 +392,7 @@ def run_agent_full(
 
         if not calls:
             answer = str(getattr(message, "content", None) or "")
+            messages.append(_assistant_message(message))
             stopped_reason = "final_answer"
             break
 
@@ -368,6 +411,16 @@ def run_agent_full(
     record.verdict = verdict
     record.verdict_reasons = reasons
     record.rationale = "; ".join(reasons)
+    if key and stopped_reason == "final_answer":
+        save_investigation(
+            memory_path,
+            key,
+            record,
+            answer,
+            str(endpoints[0]["model"]),
+            record.threshold,
+            config_hash,
+        )
     return AgentResult(
         answer=answer,
         messages=messages,
@@ -408,6 +461,7 @@ def run_agent(
     history: list[dict[str, Any]] | None = None,
     max_steps: int | None = None,
     client: Any | None = None,
+    use_memory: bool = True,
 ) -> tuple[str, list[dict[str, Any]]]:
     """Run one conversation and return ``(answer_text, messages)``."""
     result = run_agent_full(
@@ -416,5 +470,6 @@ def run_agent(
         history=history,
         max_steps=max_steps,
         client=client,
+        use_memory=use_memory,
     )
     return result.answer, result.messages

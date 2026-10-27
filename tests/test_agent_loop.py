@@ -24,8 +24,11 @@ from tests.fakes import FakeClient, make_message, make_tool_call, tool_messages 
 
 
 @pytest.fixture(autouse=True)
-def _zero_backoff(monkeypatch):
+def _zero_backoff(monkeypatch, tmp_path):
     monkeypatch.setattr(loop, "BACKOFF_SECONDS", (0.0, 0.0))
+    config = get_agent_config().copy()
+    config["memory"] = {"enabled": True, "path": str(tmp_path / "memory.sqlite")}
+    monkeypatch.setattr(loop, "get_agent_config", lambda: config)
 
 
 @pytest.fixture
@@ -60,9 +63,10 @@ def test_direct_final_answer_returns_text_and_messages(image):
     assert answer == "Verdict: nothing to flag."
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
-    assert messages[-1] == messages[-1] and messages[-1]["role"] == "user"
-    assert "quick_check" in messages[-1]["content"]
-    assert str(image) in messages[-1]["content"]
+    user_turn = next(item for item in reversed(messages) if item["role"] == "user")
+    assert "quick_check" in user_turn["content"]
+    assert str(image) in user_turn["content"]
+    assert messages[-1] == {"role": "assistant", "content": "Verdict: nothing to flag."}
     assert len(client.requests) == 1
 
 
