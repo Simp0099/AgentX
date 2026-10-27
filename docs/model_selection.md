@@ -100,3 +100,16 @@ python scripts/probe_models.py --call-cap 10        # tighter quota
 The candidate list lives in `configs/agent_candidates.yaml`. Credentials are resolved by
 `agent/env.py` from the file named by `AGENT_ENV_FILE` and then the repo-local `.env`, never
 overriding a value already exported in the shell.
+
+## Tool-message compatibility (Phase 6)
+
+The loop in `agent/loop.py` sends tool results back with **only** `role`, `tool_call_id` and
+`content`. The optional `name` field on a `tool` message, and any extra assistant fields, are
+left out deliberately: some OpenAI-compatible endpoints reject messages that carry fields they
+do not model, and the three-field form is the intersection every provider in the table above
+accepts.
+
+This was chosen **preventatively**, not in response to an observed rejection — Phase 6 ran
+entirely offline against a fake client, so no live multi-turn exchange has been recorded here.
+If a real provider later rejects a message shape, record the exact error in this section rather
+than widening the payload.

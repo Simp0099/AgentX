@@ -1,7 +1,15 @@
 """agent/llm_client.py: the single LLM SDK behind the agent's tool-calling loop.
 
-Only ONE LLM SDK is used: this module owns the provider HTTP call and exposes a
-single interface, ``LLMClient.choose_action``. Nothing lower down may reach for
+LEGACY as of Phase 6: this single-shot ``choose_action`` interface is no
+longer the primary path. The model-driven conversation now lives in
+``agent.loop`` (``run_agent``), which sends the full message history, runs
+several tool calls per turn and falls back across the configured models. This
+module is retained because the deterministic pipeline and its tests still
+depend on it, and nothing here may be deleted while ``agent/orchestrator.py``
+remains the labelled fallback.
+
+Only ONE LLM SDK is used: this module owns the provider HTTP call and exposes
+a single interface, ``LLMClient.choose_action``. Nothing lower down may reach for
 the provider directly, so the agent can be pointed at one model and one API.
 
 Configuration lives in ``configs/agent.yaml`` (read through
