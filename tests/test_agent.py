@@ -7,19 +7,19 @@ are monkeypatched with in-process fakes so the detector is never invoked.
 
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
 import sys
+from pathlib import Path
+
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.config import get_config  # noqa: E402
-from agent.llm_client import ScriptedLLMClient, LLMNotConfigured  # noqa: E402
+from agent.llm_client import ScriptedLLMClient  # noqa: E402
 from agent.orchestrator import run_llm_investigation  # noqa: E402
 from agent.schemas import ToolResult, Verdict  # noqa: E402
 from agent.state import render_report_from_observations  # noqa: E402
 from agent.tool_registry import tool_registry  # noqa: E402
+from agent.tools.common import run_bounded  # noqa: E402
 
 MAX_STEPS = 5
 
@@ -60,23 +60,6 @@ def _image_file(tmp_path):
     p = tmp_path / "img.png"
     Image.fromarray(np.full((16, 16, 3), 255, dtype=np.uint8)).save(p)
     return p
-
-
-class ScriptedLLMClient:
-    """Deterministic LLM with no network. Returns scripted tool calls."""
-
-    def __init__(self, responses):
-        self._responses = list(responses)
-
-    def choose_action(self, goal, observations, tool_schemas, timeout_seconds=None):
-        if not self._responses:
-            return SimpleNamespace(finished=True, tool=None, arguments=None)
-        response = self._responses.pop(0)
-        return SimpleNamespace(
-            finished=bool(response.get("finished", False)),
-            tool=response.get("tool"),
-            arguments=response.get("arguments"),
-        )
 
 
 def _raise(exc):
@@ -170,7 +153,9 @@ def test_tool_raises_and_loop_continues(image, monkeypatch):
     assert len(record.observations) == 2
     assert record.observations[0].tool == "run_localizer"
     assert record.observations[0].status == "error"
-    assert "boom" in record.observations[0].result
+    # A failed tool keeps its payload on ``result`` (None here) and exposes the
+    # failure message through ``rationale``, which mirrors ToolResult.error.
+    assert "boom" in record.observations[0].rationale
     assert record.observations[1].tool == "inspect_image"
     assert record.observations[1].status == "ok"
     assert any("boom" in e for e in record.errors)
@@ -183,11 +168,14 @@ def test_tool_timeouts_and_loop_continues(image, monkeypatch):
     def slow_inspect(path, timeout=None):
         import time
 
-        time.sleep(0.2)
-        return {"valid": True, "width": 8, "height": 8, "sha256": "bbbb"}
+        def work():
+            time.sleep(0.2)
+            return {"valid": True, "width": 8, "height": 8, "sha256": "bbbb"}
 
-    # A tool that ignores the per-tool timeout and burns time: the dispatcher
-    # wraps the resulting exception as an "error" and the loop keeps going.
+        # Every real tool bounds itself with run_bounded; the fake does the same
+        # so the timeout path is exercised end to end through the loop.
+        return run_bounded("inspect_image", work, timeout)
+
     monkeypatch.setitem(tool_registry["inspect_image"], "callable", slow_inspect)
     client = ScriptedLLMClient(
         [
@@ -199,8 +187,8 @@ def test_tool_timeouts_and_loop_continues(image, monkeypatch):
 
     assert len(record.observations) == 1
     assert record.observations[0].tool == "inspect_image"
-    assert record.observations[0].status == "error"
-    assert "timed out" in record.observations[0].result.lower()
+    assert record.observations[0].status == "timeout"
+    assert "timed out" in record.observations[0].rationale.lower()
     assert any("timed out" in e for e in record.errors)
     assert record.verdict is not None
 
@@ -219,20 +207,16 @@ def test_conflicting_observations_yeild_inconclusive(image, monkeypatch):
     monkeypatch.setitem(
         tool_registry["validate_prediction"],
         "callable",
-        lambda run_result, image_width, image_height, timeout=None: {
-            "tool": "validate_prediction",
-            "status": "ok",
-            "result": {"valid": False, "issues": ["box inverted"]},
-        },
+        lambda run_result, image_width, image_height, timeout=None: ToolResult(
+            "validate_prediction", "ok", {"valid": False, "issues": ["box inverted"]}
+        ),
     )
     monkeypatch.setitem(
         tool_registry["compare_evidence"],
         "callable",
-        lambda record, timeout=None: {
-            "tool": "compare_evidence",
-            "status": "ok",
-            "result": {"agreements": [], "conflicts": ["score-box conflict"]},
-        },
+        lambda record, timeout=None: ToolResult(
+            "compare_evidence", "ok", {"agreements": [], "conflicts": ["score-box conflict"]}
+        ),
     )
     client = ScriptedLLMClient(
         [
@@ -249,7 +233,10 @@ def test_conflicting_observations_yeild_inconclusive(image, monkeypatch):
     record = run_llm_investigation(str(image), llm_client=client, max_steps=MAX_STEPS)
 
     assert record.verdict == Verdict.INCONCLUSIVE
-    assert any("score-box conflict" in e for e in record.errors)
+    # The conflict is recorded on the compare_evidence observation, which is
+    # where the fact lives; it drives the Inconclusive verdict above.
+    comparison = next(o for o in record.observations if o.tool == "compare_evidence")
+    assert "score-box conflict" in (comparison.result or {}).get("conflicts", [])
     assert record.verdict_reasons
 
 
@@ -258,20 +245,18 @@ def test_report_contains_only_facts_in_state(image, monkeypatch):
     monkeypatch.setitem(
         tool_registry["run_localizer"],
         "callable",
-        lambda path, threshold, detector=None, timeout=None: {
-            "tool": "run_localizer",
-            "status": "ok",
-            "result": {"score": 0.2, "tampered_prob": 0.2, "bbox": [0.1, 0.1, 0.9, 0.9], "label": "fake"},
-        },
+        lambda path, threshold, detector=None, timeout=None: ToolResult(
+            "run_localizer",
+            "ok",
+            {"score": 0.2, "tampered_prob": 0.2, "bbox": [0.1, 0.1, 0.9, 0.9], "label": "fake"},
+        ),
     )
     monkeypatch.setitem(
         tool_registry["validate_prediction"],
         "callable",
-        lambda run_result, image_width, image_height, timeout=None: {
-            "tool": "validate_prediction",
-            "status": "ok",
-            "result": {"valid": True, "issues": []},
-        },
+        lambda run_result, image_width, image_height, timeout=None: ToolResult(
+            "validate_prediction", "ok", {"valid": True, "issues": []}
+        ),
     )
     client = ScriptedLLMClient(
         [
@@ -286,7 +271,7 @@ def test_report_contains_only_facts_in_state(image, monkeypatch):
         record.observations, record.verdict.value, record.verdict_reasons, record.goal, record.filename
     )
     assert "0.2" in text
-    assert "sample.png" in text
+    assert "img.png" in text
     assert "Not flagged by this detector" in text
     # Unstored numbers must not appear.
     assert "0.999" not in text
