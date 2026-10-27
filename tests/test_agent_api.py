@@ -20,6 +20,7 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from agent.loop import AgentResult  # noqa: E402
 from agent import api  # noqa: E402
 from agent.agent_tools import TOOL_SCHEMAS, TOOLS  # noqa: E402
 
@@ -166,7 +167,24 @@ def test_tools_returns_the_same_schemas(client):
     assert sorted(names) == sorted(TOOLS)
 
 
-def test_chat_returns_structured_evidence_card(client, image):
+def test_chat_returns_structured_evidence_card(client, image, monkeypatch):
+    from app import chat_handler
+
+    # Force the model-unavailable condition so this test deterministically
+    # exercises the real fixed-pipeline fallback without making an LLM request.
+    monkeypatch.setattr(
+        chat_handler,
+        "run_agent_full",
+        lambda **_kwargs: AgentResult(
+            answer="Model unavailable",
+            messages=[],
+            record=None,
+            steps=0,
+            stopped_reason="model_unavailable",
+            errors=["RuntimeError: no model available"],
+        ),
+    )
+
     response = client.post(
         "/api/chat",
         json={"message": "Check this image", "image_path": str(image)},
