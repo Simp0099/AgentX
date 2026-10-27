@@ -244,12 +244,18 @@ MAX_STEPS = 5  # default number of LLM turn-steps per investigation
 
 
 def build_tool_schemas() -> list[dict[str, Any]]:
-    """Return the JSON schemas of the approved tools, cached."""
+    """Return the approved tools as OpenAI ``tools`` entries, cached.
+
+    The model-facing shape lives in ``agent.agent_tools.TOOL_SCHEMAS``: each
+    entry is ``{"type": "function", "function": {name, description,
+    parameters}}``, which is what an OpenAI-compatible endpoint expects. The
+    previous version returned bare JSON Schema objects, which the API rejects.
+    """
     cache_key = "_tool_schemas"
     if not getattr(build_tool_schemas, cache_key, None):
-        setattr(build_tool_schemas, cache_key, [
-            entry["input_schema"] for entry in tool_registry.values()
-        ])
+        from agent.agent_tools import TOOL_SCHEMAS
+
+        setattr(build_tool_schemas, cache_key, list(TOOL_SCHEMAS))
     return getattr(build_tool_schemas, cache_key)  # type: ignore[return-value]
 
 
