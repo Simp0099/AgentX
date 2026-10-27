@@ -6,7 +6,7 @@ remains lightweight and works without network access.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
@@ -14,6 +14,7 @@ from typing import Literal
 
 class Verdict(Enum):
     """Verdict taxonomy — exactly these four; "authentic" is banned."""
+
     FLAGGED_FOR_REVIEW = "Flagged for review"
     FLAGGED_REGION_UNAVAILABLE = "Flagged, region unavailable"
     NOT_FLAGGED_BY_THIS_DETECTOR = "Not flagged by this detector"
@@ -22,6 +23,7 @@ class Verdict(Enum):
 
 class Outcome(Enum):
     """High-level outcome of an investigation."""
+
     COMPLETED = "completed"
     INCONCLUSIVE = "inconclusive"
     FAILED = "failed"
@@ -31,17 +33,20 @@ class Outcome(Enum):
 @dataclass
 class Observation:
     """A single tool observation in the investigation record."""
+
     tool: str
     args: dict[str, object]
     status: str  # "ok", "error", "timeout"
     result: dict[str, object] | None = None
     duration_ms: float | None = None
     rationale: str = ""  # fixed string from policy, never LLM text
+    timestamp_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
 class ToolResult:
     """Typed outcome shared by all forensic tools."""
+
     tool: str
     status: Literal["ok", "error", "timeout"]
     result: dict[str, object] | None = None
@@ -86,9 +91,14 @@ class InvestigationRecord:
     observations: list[Observation]
     errors: list[str]
     rationale: str  # free-form but must only reference numbers in the record
+    sha256: str = ""
     verdict: Verdict | None = None
-    verdict_reasons: list[str] = None
-    created_at_utc: str = datetime.now(timezone.utc).isoformat()
+    verdict_reasons: list[str] = field(default_factory=list)
+    created_at_utc: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    planner_status: str = "not_configured"
+    summary: str = ""
+    image_path: str = ""
+    config_snapshot: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         """Serialise the record to a plain dict (JSON-safe)."""
@@ -109,6 +119,7 @@ class InvestigationRecord:
                     "result": o.result,
                     "duration_ms": o.duration_ms,
                     "rationale": o.rationale,
+                    "timestamp_utc": o.timestamp_utc,
                 }
                 for o in self.observations
             ],
@@ -117,4 +128,9 @@ class InvestigationRecord:
             "verdict": self.verdict.value if self.verdict else None,
             "verdict_reasons": self.verdict_reasons or [],
             "created_at_utc": self.created_at_utc,
+            "sha256": self.sha256,
+            "planner_status": self.planner_status,
+            "summary": self.summary,
+            "image_path": self.image_path,
+            "config_snapshot": self.config_snapshot,
         }

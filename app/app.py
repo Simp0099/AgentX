@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+from PIL import Image
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import gradio as gr  # noqa: E402
@@ -27,17 +29,60 @@ def analyze(image, threshold):
     return _analyze(image, threshold, detector=DETECTOR)
 
 
+def analyze_uploads(files, threshold, goal, custom_text):
+    """Run each uploaded image through the same investigation handler."""
+    if not files:
+        return [], [], [], "Upload one or more images to begin."
+    if not isinstance(files, list):
+        files = [files]
+    originals, ela_maps, overlays, details = [], [], [], []
+    for uploaded in files:
+        path = getattr(uploaded, "name", uploaded)
+        try:
+            with Image.open(path) as source:
+                original = source.convert("RGB")
+            original.filename = Path(path).name
+            ela, _scores, overlay, detail = _analyze(
+                original,
+                threshold,
+                detector=DETECTOR,
+                goal=goal,
+                custom_text=custom_text,
+            )
+            caption = escape_filename(Path(path).name)
+            originals.append((original, caption))
+            if ela is not None:
+                ela_maps.append((ela, caption))
+            if overlay is not None:
+                overlay_caption = f"{caption} — Model-predicted tampered region (ELA-based)"
+                overlays.append((overlay, overlay_caption))
+            details.append(f"## {caption}\n\n{detail}")
+        except Exception as exc:  # one malformed upload must not hide other results
+            details.append(f"## Upload failed\n\n{type(exc).__name__}: {escape_filename(str(exc))}")
+    return originals, ela_maps, overlays, "\n\n---\n\n".join(details)
+
+
+def escape_filename(value):
+    """Escape filenames before rendering them in Markdown captions."""
+    from agent.rendering import escape_untrusted
+
+    return escape_untrusted(value)
+
+
 def analyze_batch(zip_file):
     """Validate and unpack an uploaded image archive through the batch API."""
     if zip_file is None:
         return "Upload a ZIP file to begin."
     zip_path = getattr(zip_file, "name", zip_file)
-    result = process_batch(str(zip_path), "artifacts/batch")
+    result = process_batch(str(zip_path), "artifacts/batch", detector=DETECTOR)
     lines = [f"Batch status: {result['status']}"]
     if result.get("error"):
         lines.append(f"Error: {result['error']}")
     for item in result.get("results", []):
-        lines.append(f"- {item['filename']}: {item['status']}")
+        verdict = f" ({item['verdict']})" if item.get("verdict") else ""
+        lines.append(f"- {item['filename']}: {item['status']}{verdict}")
+    if result.get("batch_pdf"):
+        lines.append(f"Batch PDF: {result['batch_pdf']}")
     if not result.get("results") and not result.get("error"):
         lines.append("- No image files found.")
     return "\n".join(lines)
@@ -46,7 +91,7 @@ def analyze_batch(zip_file):
 DESCRIPTION = """
 # Deepfake / Tampering Region Localizer
 
-Upload an image to run the deterministic forensic checks. The investigation
+Upload one or more images to run the deterministic forensic checks. The investigation
 record supplies the verdict, uncalibrated score, and executed-check log.
 
 **Limitations.** Trained on CASIA v2 splices. Heavy re-compression,
@@ -60,18 +105,34 @@ with gr.Blocks(title="Deepfake Tampering Localizer") as demo:
         gr.Markdown(f"> No trained checkpoint loaded: `{LOAD_ERROR}`")
     with gr.Row():
         with gr.Column():
-            image_input = gr.Image(type="pil", label="Upload an image")
+            image_input = gr.File(
+                type="filepath",
+                file_count="multiple",
+                file_types=["image"],
+                label="Upload one or more images",
+            )
+            goal = gr.Dropdown(
+                choices=["Quick check", "Detailed", "Custom text"],
+                value="Quick check",
+                label="Investigation goal",
+            )
+            custom_goal = gr.Textbox(label="Custom goal", lines=2, max_lines=4)
             threshold = gr.Slider(
-                0.1, 0.9, value=0.5, step=0.05,
+                0.1,
+                0.9,
+                value=0.5,
+                step=0.05,
                 label="Decision threshold",
                 info="Lower catches more tampering but raises false alarms.",
             )
             run = gr.Button("Analyze", variant="primary")
         with gr.Column():
-            overlay_output = gr.Image(label="Predicted tampered region")
-            label_output = gr.Label(label="Prediction", num_top_classes=2)
+            original_output = gr.Gallery(label="Original images", columns=2, height="auto")
+            overlay_output = gr.Gallery(
+                label="Model-predicted tampered region (ELA-based)", columns=2, height="auto"
+            )
     with gr.Row():
-        ela_output = gr.Image(label="ELA map")
+        ela_output = gr.Gallery(label="ELA maps (checks actually run)", columns=2, height="auto")
         detail_output = gr.Markdown()
 
     gr.Markdown("## Batch ZIP validation")
@@ -81,10 +142,11 @@ with gr.Blocks(title="Deepfake Tampering Localizer") as demo:
     batch_output = gr.Textbox(label="Batch result", lines=6, interactive=False)
     batch_button.click(analyze_batch, inputs=[batch_input], outputs=[batch_output])
 
-    run.click(analyze, inputs=[image_input, threshold],
-              outputs=[ela_output, label_output, overlay_output, detail_output])
-    image_input.change(analyze, inputs=[image_input, threshold],
-                       outputs=[ela_output, label_output, overlay_output, detail_output])
+    run.click(
+        analyze_uploads,
+        inputs=[image_input, threshold, goal, custom_goal],
+        outputs=[original_output, ela_output, overlay_output, detail_output],
+    )
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))

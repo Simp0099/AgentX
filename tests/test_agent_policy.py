@@ -8,52 +8,93 @@ from agent.verdict import decide
 
 
 def record(score=None, goal="quick_check", validation=None, conditional=None):
-    observations = [Observation("inspect_image", {}, "ok", {"valid": True, "width": 100, "height": 100})]
+    observations = [
+        Observation("inspect_image", {}, "ok", {"valid": True, "width": 100, "height": 100})
+    ]
     if score is not None:
-        observations.append(Observation("run_localizer", {}, "ok", {"tampered_prob": score,
-                                                                          "bbox": [0.1, 0.1, 0.8, 0.8]}))
+        observations.append(
+            Observation(
+                "run_localizer", {}, "ok", {"tampered_prob": score, "bbox": [0.1, 0.1, 0.8, 0.8]}
+            )
+        )
     if validation is not None:
         observations.append(Observation("validate_prediction", {}, "ok", validation))
     observations.extend(conditional or [])
-    return InvestigationRecord("id", "hash", "sample.png", goal, goal, 0.5, "", "stub",
-                               observations, [], "", created_at_utc="2026-01-01T00:00:00Z")
+    return InvestigationRecord(
+        "id",
+        "hash",
+        "sample.png",
+        goal,
+        goal,
+        0.5,
+        "",
+        "stub",
+        observations,
+        [],
+        "",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
 
 
 def test_uncertain_score_schedules_ela_and_metadata():
     r = record(0.5)
+    assert next_checks(r)[0][0].tool == "validate_prediction"
+    r.observations.append(
+        Observation("validate_prediction", {}, "ok", {"valid": True, "issues": []})
+    )
     assert next_checks(r)[0][0].tool == "generate_ela"
     r.observations.append(Observation("generate_ela", {}, "ok", {"artifact": "ela.png"}))
     assert next_checks(r)[0][0].tool == "inspect_metadata"
 
 
 def test_high_score_schedules_ela():
-    assert next_checks(record(0.9))[0][0].tool == "generate_ela"
+    r = record(0.9)
+    assert next_checks(r)[0][0].tool == "validate_prediction"
+    r.observations.append(
+        Observation("validate_prediction", {}, "ok", {"valid": True, "issues": []})
+    )
+    assert next_checks(r)[0][0].tool == "generate_ela"
 
 
 def test_origin_goal_schedules_metadata_but_non_origin_does_not():
     origin = record(0.2, "origin camera source")
+    assert next_checks(origin)[0][0].tool == "validate_prediction"
+    origin.observations.append(
+        Observation("validate_prediction", {}, "ok", {"valid": True, "issues": []})
+    )
     assert next_checks(origin)[0][0].tool == "inspect_metadata"
     ordinary = record(0.2)
     assert next_checks(ordinary)[0][0].tool == "validate_prediction"
 
 
 def test_conflict_schedules_compare_and_unresolved_is_inconclusive():
-    r = record(0.9, validation={"valid": False, "issues": ["box inverted"]},
-               conditional=[Observation("generate_ela", {}, "ok", {}),
-                             Observation("inspect_metadata", {}, "ok", {})])
+    r = record(
+        0.9,
+        validation={"valid": False, "issues": ["box inverted"]},
+        conditional=[
+            Observation("generate_ela", {}, "ok", {}),
+            Observation("inspect_metadata", {}, "ok", {}),
+        ],
+    )
     assert next_checks(r)[0][0].tool == "compare_evidence"
-    r.observations.append(Observation("compare_evidence", {}, "ok", {"conflicts": ["score-box conflict"]}))
+    r.observations.append(
+        Observation("compare_evidence", {}, "ok", {"conflicts": ["score-box conflict"]})
+    )
     assert decide(r)[0] == Verdict.INCONCLUSIVE
 
 
 def test_conditional_evidence_changes_verdict():
     baseline = record(0.9, validation={"valid": False, "issues": ["box inverted"]})
     assert decide(baseline)[0] == Verdict.FLAGGED_REGION_UNAVAILABLE
-    investigated = record(0.9, validation={"valid": False, "issues": ["box inverted"]},
-                          conditional=[Observation("generate_ela", {}, "ok", {}),
-                                       Observation("inspect_metadata", {}, "ok", {}),
-                                       Observation("compare_evidence", {}, "ok",
-                                                   {"conflicts": ["score-box conflict"]})])
+    investigated = record(
+        0.9,
+        validation={"valid": False, "issues": ["box inverted"]},
+        conditional=[
+            Observation("generate_ela", {}, "ok", {}),
+            Observation("inspect_metadata", {}, "ok", {}),
+            Observation("compare_evidence", {}, "ok", {"conflicts": ["score-box conflict"]}),
+        ],
+    )
     assert decide(investigated)[0] == Verdict.INCONCLUSIVE
 
 
@@ -70,8 +111,9 @@ def test_budget_two_attempts_exactly_two_calls(monkeypatch):
 
     monkeypatch.setitem(tool_registry["inspect_image"], "callable", inspect)
     monkeypatch.setitem(tool_registry["run_localizer"], "callable", localize)
-    record_result = run_investigation("sample.png", config={"threshold": 0.5,
-                                                               "max_tool_calls_per_image": 2})
+    record_result = run_investigation(
+        "sample.png", config={"threshold": 0.5, "max_tool_calls_per_image": 2}
+    )
     assert len(attempts) == 2
     assert record_result.verdict is not None
 
@@ -89,7 +131,8 @@ def test_invalid_inspect_is_inconclusive_without_localizer(monkeypatch):
 
     monkeypatch.setitem(tool_registry["inspect_image"], "callable", inspect)
     monkeypatch.setitem(tool_registry["run_localizer"], "callable", localize)
-    result = run_investigation("sample.png", config={"threshold": 0.5,
-                                                        "max_tool_calls_per_image": 3})
+    result = run_investigation(
+        "sample.png", config={"threshold": 0.5, "max_tool_calls_per_image": 3}
+    )
     assert result.verdict == Verdict.INCONCLUSIVE
     assert attempts == ["inspect_image"]

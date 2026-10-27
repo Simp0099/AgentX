@@ -50,8 +50,7 @@ class TamperingDetector:
     checkpoint path fails at startup instead of on the first user upload.
     """
 
-    def __init__(self, checkpoint=DEFAULT_CHECKPOINT, image_size=(224, 224),
-                 ela_quality=90, threshold=0.5):
+    def __init__(self, checkpoint=DEFAULT_CHECKPOINT, image_size=None, ela_quality=None):
         checkpoint = Path(checkpoint)
         if not checkpoint.exists():
             raise FileNotFoundError(
@@ -60,12 +59,24 @@ class TamperingDetector:
             )
         # Custom layers/losses self-register via @register_keras_serializable,
         # so no custom_objects dict is needed here.
+        cfg = _load_config()
+        data_cfg = cfg.get("data", {})
+        forensics_cfg = cfg.get("forensics", {})
+        configured_size = data_cfg["image_size"]
+        self.image_size = tuple(image_size or configured_size)
+        self.ela_quality = int(ela_quality if ela_quality is not None else data_cfg["ela_quality"])
+        self.max_image_pixels = int(forensics_cfg["max_image_pixels"])
+        self.max_file_bytes = int(forensics_cfg["max_file_bytes"])
+        self.min_box_area = float(forensics_cfg["min_box_area"])
+        self.max_box_coverage = float(forensics_cfg["max_box_coverage"])
+        self.supported_extensions = {
+            str(extension).lower() for extension in forensics_cfg["supported_image_extensions"]
+        }
         self.model = tf.keras.models.load_model(checkpoint)
-        self.image_size = tuple(image_size)
-        self.ela_quality = ela_quality
-        # SHA-256 of the checkpoint file, computed once at load time.
-        self.model_version = hashlib.sha256(str(checkpoint.resolve()).encode()).hexdigest()
-        # Threshold is not stored as mutable state; it is passed per-call to predict().
+        # Fingerprint checkpoint contents once, not the location where it lives.
+        with checkpoint.open("rb") as model_file:
+            self.model_version = hashlib.file_digest(model_file, "sha256").hexdigest()
+        # Threshold is not stored as mutable state; it is passed per call.
 
     def preprocess(self, image):
         """Image -> (batched 6-channel input, original PIL image, ELA PIL image).
@@ -76,9 +87,30 @@ class TamperingDetector:
         detail that carries the signal.
         """
         if isinstance(image, (str, Path)):
-            image = Image.open(image)
+            image_path = Path(image)
+            if image_path.suffix.lower() not in self.supported_extensions:
+                raise ValueError(f"Unsupported image extension: {image_path.suffix or '(none)'}")
+            file_size = image_path.stat().st_size
+            if file_size > self.max_file_bytes:
+                raise ValueError(
+                    f"Image file is {file_size} bytes; byte limit is {self.max_file_bytes}"
+                )
+            with Image.open(image_path) as opened:
+                if opened.width * opened.height > self.max_image_pixels:
+                    raise ValueError(
+                        f"Image has {opened.width * opened.height} pixels; "
+                        f"pixel limit is {self.max_image_pixels}"
+                    )
+                image = opened.copy()
         elif isinstance(image, np.ndarray):
             image = Image.fromarray(image.astype(np.uint8))
+        elif not isinstance(image, Image.Image):
+            raise TypeError("image must be a PIL image, numpy array, or image path")
+        if image.width * image.height > self.max_image_pixels:
+            raise ValueError(
+                f"Image has {image.width * image.height} pixels; "
+                f"pixel limit is {self.max_image_pixels}"
+            )
         image = image.convert("RGB")
 
         # ELA is computed on the FULL-resolution image and only then resized.
@@ -91,6 +123,35 @@ class TamperingDetector:
         x = np.concatenate([rgb, ela], axis=-1)[None, ...]
         return x, image, ela_pil
 
+    def _infer(self, image):
+        """Preprocess once, run the locked model, and validate its outputs."""
+        x, original, ela_pil = self.preprocess(image)
+        with _inference_lock:
+            out = self.model(x, training=False)
+        if not isinstance(out, dict) or "label" not in out or "bbox" not in out:
+            raise ValueError("Model output must contain label and bbox tensors")
+
+        score_values = np.asarray(out["label"], dtype=np.float64)
+        if score_values.size != 1:
+            raise ValueError("Model label output must contain one score per image")
+        tampered_prob = float(score_values.reshape(-1)[0])
+        if not np.isfinite(tampered_prob) or not 0.0 <= tampered_prob <= 1.0:
+            raise ValueError("Model tampered score must be finite and within [0, 1]")
+
+        box_values = np.asarray(out["bbox"], dtype=np.float64)
+        if box_values.size != 5:
+            raise ValueError("Model bbox output must contain four corners and has_box")
+        coordinates = box_values.reshape(-1)[:4]
+        bbox_raw = None
+        if np.all(np.isfinite(coordinates)):
+            xmin, ymin, xmax, ymax = map(float, coordinates)
+            if 0.0 <= xmin < xmax <= 1.0 and 0.0 <= ymin < ymax <= 1.0:
+                area = (xmax - xmin) * (ymax - ymin)
+                if self.min_box_area <= area <= self.max_box_coverage:
+                    bbox_raw = [xmin, ymin, xmax, ymax]
+
+        return tampered_prob, bbox_raw, original, ela_pil
+
     def predict_raw(self, image):
         """Raw prediction without threshold applied.
 
@@ -101,23 +162,12 @@ class TamperingDetector:
             image_size    : (width, height) of the original image in pixels
             model_version : str, SHA-256 of the checkpoint file
         """
-        x, original, ela_pil = self.preprocess(image)
-        original_size = original.size  # (width, height) in pixels
-
-        with _inference_lock:
-            out = self.model(x, training=False)
-
-        tampered_prob = float(np.asarray(out["label"]).ravel()[0])
-        box = np.asarray(out["bbox"]).ravel()[:4].astype(float)
-
-        # Return raw box without threshold applied; caller decides.
-        xmin, ymin, xmax, ymax = box
-        bbox_raw = [min(xmin, xmax), min(ymin, ymax), max(xmin, xmax), max(ymin, ymax)]
+        tampered_prob, bbox_raw, original, _ela_pil = self._infer(image)
 
         return {
             "tampered_prob": tampered_prob,
             "bbox_raw": bbox_raw,
-            "image_size": original_size,
+            "image_size": original.size,
             "model_version": self.model_version,
         }
 
@@ -141,16 +191,12 @@ class TamperingDetector:
         if threshold is None:
             # Load threshold from config YAML if not provided explicitly.
             cfg = _load_config()
-            threshold = cfg["output"].get("threshold", 0.5)
+            threshold = cfg["output"]["threshold"]
+        threshold = float(threshold)
+        if not np.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+            raise ValueError("threshold must be finite and within [0, 1]")
 
-        # Do NOT write to shared state: DETECTOR.threshold = threshold is removed.
-
-        x, original, ela_pil = self.preprocess(image)
-        with _inference_lock:
-            out = self.model(x, training=False)
-
-        tampered_prob = float(np.asarray(out["label"]).ravel()[0])
-        box = np.asarray(out["bbox"]).ravel()[:4].astype(float)
+        tampered_prob, box, original, ela_pil = self._infer(image)
 
         is_tampered = tampered_prob > threshold
         # Report confidence in whichever class was predicted, not the raw sigmoid.
@@ -159,9 +205,6 @@ class TamperingDetector:
 
         # Guard against an inverted box, which sigmoid outputs allow: nothing
         # forces xmin < xmax, and an inverted box yields a negative-area IoU.
-        xmin, ymin, xmax, ymax = box
-        box = [min(xmin, xmax), min(ymin, ymax), max(xmin, xmax), max(ymin, ymax)]
-
         return {
             "label": "tampered" if is_tampered else "authentic",
             "confidence": confidence,
@@ -178,9 +221,7 @@ class TamperingDetector:
         result = self.predict(image, threshold=threshold)
         if result["bbox"] is not None:
             caption = f"tampered {result['confidence'] * 100:.0f}%"
-            result["overlay"] = draw_boxes(
-                result["image"], [result["bbox"]], labels=[caption]
-            )
+            result["overlay"] = draw_boxes(result["image"], [result["bbox"]], labels=[caption])
         else:
             result["overlay"] = result["image"]
         return result
@@ -190,21 +231,26 @@ def main():
     parser = argparse.ArgumentParser(description="Detect and localize image tampering")
     parser.add_argument("--image", required=True)
     parser.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
-    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--save-overlay", default=None, help="write the box overlay here")
     parser.add_argument("--save-ela", default=None, help="write the ELA map here")
     args = parser.parse_args()
 
-    detector = TamperingDetector(args.checkpoint, threshold=args.threshold)
-    result = detector.predict_with_overlay(args.image)
+    detector = TamperingDetector(args.checkpoint)
+    result = detector.predict_with_overlay(args.image, threshold=args.threshold)
 
-    print(json.dumps({
-        "image": args.image,
-        "label": result["label"],
-        "confidence": round(result["confidence"], 4),
-        "tampered_prob": round(result["tampered_prob"], 4),
-        "bbox": [round(v, 4) for v in result["bbox"]] if result["bbox"] else None,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "image": args.image,
+                "label": result["label"],
+                "confidence": round(result["confidence"], 4),
+                "tampered_prob": round(result["tampered_prob"], 4),
+                "bbox": [round(v, 4) for v in result["bbox"]] if result["bbox"] else None,
+            },
+            indent=2,
+        )
+    )
 
     if args.save_overlay:
         result["overlay"].save(args.save_overlay)

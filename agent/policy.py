@@ -7,51 +7,58 @@ from agent.schemas import InvestigationRecord
 from agent.tool_registry import ToolCall
 
 
-def _observations(record):
-    return [obs for obs in record.observations if not isinstance(obs, list)]
-
-
 def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
-    """Return the next unrun checks based only on recorded evidence."""
-    obs = _observations(record)
-    by_tool = {item.tool: item for item in obs}
+    """Return the next check group based only on recorded evidence."""
+    observations = [obs for obs in record.observations if not isinstance(obs, list)]
+    by_tool = {obs.tool: obs for obs in observations}
     done = set(by_tool)
-    image_path = record.image_id
+    path = record.image_path or record.image_id
     if "inspect_image" not in done:
-        return [[ToolCall("inspect_image", {"path": image_path})]]
+        return [[ToolCall("inspect_image", {"path": path})]]
     inspected = by_tool["inspect_image"].result or {}
     if not inspected.get("valid", True):
         return []
     if "run_localizer" not in done:
-        return [[ToolCall("run_localizer", {"path": image_path,
-                                             "threshold": record.threshold})]]
+        return [[ToolCall("run_localizer", {"path": path, "threshold": record.threshold})]]
     localizer = by_tool["run_localizer"].result or {}
+    if "validate_prediction" not in done:
+        return [
+            [
+                ToolCall(
+                    "validate_prediction",
+                    {
+                        "run_result": localizer,
+                        "image_width": inspected.get("width"),
+                        "image_height": inspected.get("height"),
+                    },
+                )
+            ]
+        ]
+
+    validation = by_tool["validate_prediction"].result or {}
     score = localizer.get("tampered_prob")
-    if score is None:
+    config = get_config().get("forensics", {})
+    if not isinstance(score, (int, float)):
         return []
-    cfg = get_config().get("forensics", {})
-    low = float(cfg.get("uncertain_low", 0.4))
-    high = float(cfg.get("uncertain_high", 0.6))
-    uncertain = low <= score <= high
+    uncertain = (
+        float(config.get("uncertain_low", 0.4)) <= score <= float(config.get("uncertain_high", 0.6))
+    )
     flagged = score >= record.threshold
     goal = f"{record.goal} {record.goal_text}".lower()
-    origin = any(word in goal for word in ("origin", "source", "camera", "editing", "history"))
-    if (uncertain or flagged) and "generate_ela" not in done:
-        return [[ToolCall("generate_ela", {"path": image_path})]]
-    if (uncertain or origin) and "inspect_metadata" not in done:
-        return [[ToolCall("inspect_metadata", {"path": image_path})]]
-    if "validate_prediction" not in done:
-        return [[ToolCall("validate_prediction", {
-            "raw_score": score, "bbox": localizer.get("bbox"),
-            "image_width": (by_tool["inspect_image"].result or {}).get("width"),
-            "image_height": (by_tool["inspect_image"].result or {}).get("height"),
-        })]]
-    validation = by_tool["validate_prediction"].result or {}
-    conflict = (flagged and not validation.get("valid", False)) or uncertain
-    if conflict and "generate_ela" not in done:
-        return [[ToolCall("generate_ela", {"path": image_path})]]
-    if conflict and "inspect_metadata" not in done:
-        return [[ToolCall("inspect_metadata", {"path": image_path})]]
+    metadata_goal = any(
+        word in goal for word in ("origin", "source", "camera", "editing", "history")
+    )
+    issues = validation.get("issues", [])
+    box_problem = any("box" in str(issue).lower() for issue in issues)
+    coverage_problem = any("coverage" in str(issue).lower() for issue in issues)
+    conflict = (flagged and box_problem) or coverage_problem
+
+    need_ela = uncertain or flagged or conflict
+    need_metadata = uncertain or metadata_goal or conflict
+    if need_ela and "generate_ela" not in done:
+        return [[ToolCall("generate_ela", {"path": path})]]
+    if need_metadata and "inspect_metadata" not in done:
+        return [[ToolCall("inspect_metadata", {"path": path})]]
     if conflict and "compare_evidence" not in done:
         return [[ToolCall("compare_evidence", {"record": record})]]
     return []

@@ -25,10 +25,31 @@ output:
 forensics:
   max_image_pixels: 40000000
   max_file_bytes: 50000000
+  supported_image_extensions: [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"]
   min_box_area: 0.001
   max_box_coverage: 0.95
+  metadata_fields: ["Make", "Model", "DateTime", "DateTimeOriginal", "Software", "GPSInfo"]
   ela_temp_dir: artifacts/ela
   tool_timeout_seconds: 10
   planner_budget: 4
+  max_tool_calls_per_image: 10
+  report_asset_roots: ["artifacts/uploads", "artifacts/batch"]
+  max_zip_compressed_bytes: 25000000
+  max_zip_uncompressed_bytes: 100000000
+  max_zip_members: 100
+  max_zip_compression_ratio: 100
+  max_batch_processing_seconds: 120
+  batch_workers: 2
+  report_limitations:
+    - "The detector score is an uncalibrated model output, not a probability."
+    - "A flagged result is a review signal and is not proof of manipulation."
+    - "Uniform re-encoding, screenshots, and generated imagery may not show splice evidence."
   uncertain_low: 0.4
   uncertain_high: 0.6
+
+evaluation:
+  synthetic_records_per_class: 6
+  synthetic_image_size: 128
+  low_contrast_blend: 0.35
+  first_reencode_quality: 48
+  final_reencode_quality: 38

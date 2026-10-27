@@ -196,33 +196,37 @@ CLI, Python API, and Gradio interface for scoring single images. Details:
 Accuracy, F1, ROC AUC, and IoU-based localization metrics, plus how to run
 cross-dataset evaluation. Details: **[EVALUATION.md](EVALUATION.md)**.
 
-## Agent modules and wiring
+## Forensic agent
 
-The running app is `app/app.py` (Dockerfile `CMD ["python", "app/app.py"]`,
-README quick start `python3 app/app.py`). It is the **only** Gradio entry
-point. The app imports the schemas, verdict, orchestrator module, ELA
-preprocessing, and inference loader. The orchestration module is imported but
-app inference has not yet been routed through it. See the current map in
-[docs/wiring.md](docs/wiring.md).
+The Gradio app routes image investigations through `agent.orchestrator`.
+Deterministic code always runs image inspection, the localizer, and prediction
+validation. The configured policy may then run ELA generation, metadata
+inspection, or evidence comparison based on the score, validation result, and
+investigation goal. Calls are bounded by configured timeouts and a per-image
+tool budget; unsupported planner proposals are rejected and recorded.
 
-| Module | Imported by the app? | Status |
-|--------|----------------------|--------|
-| `agent/verdict.py` | Yes (`agent.verdict`) | WIRED |
-| `agent/schemas.py` | Yes (`agent.schemas`) | WIRED |
-| `agent/orchestrator.py` | Yes (module import) | WIRED IMPORT; not yet called by app |
-| `agent/config.py`, policy, registry, tools | Yes, transitively | Imported by orchestrator but not used in app inference |
-| `agent/batch.py`, planner, reporting, summary | No | LIBRARY ONLY; see docs/wiring.md |
-| `scripts/` modules | No | LIBRARY/CLI ONLY; details in docs/wiring.md |
+An optional Anthropic planner is used only when both `ANTHROPIC_API_KEY` and
+`ANTHROPIC_MODEL` are set. It can request tools from the approved conditional
+registry, but it cannot run commands, choose arbitrary paths, or set the
+verdict. Without those environment values, the deterministic policy still
+produces an investigation record and verdict. Verdicts come from explicit
+rules and use the categories **Flagged for review**, **Flagged, region
+unavailable**, **Not flagged by this detector**, and **Inconclusive**.
 
-"Library only" means the module is never imported by the running app. Some
-orchestration modules are loaded transitively because the app imports the
-orchestrator, but the app does not call it yet. Import status does not verify
-behavior.
+The UI labels the model output `tampered score (uncalibrated)`. It displays
+only checks recorded as executed, and shows ELA or a localization overlay only
+when the corresponding evidence was produced. Filenames, goal text, and
+metadata are treated as untrusted content when rendered. The app supports
+multiple image uploads and ZIP batch validation; PDF reports are generated
+from structured investigation records. Email delivery is not implemented.
 
-**Email (Phase 9):** the email module was deleted/not implemented. There is
-no email code in this repository; sending reports by mail is not available
-and nothing in the default configuration performs network email calls. Email
-is not implemented.
+This pipeline does not prove whether an image was manipulated, identify its
+source, or provide a calibrated probability. The optional planner does not
+change model weights or preprocessing, and no improvement over the baseline
+has been established on a real labeled benchmark. Email is not implemented.
+See [docs/wiring.md](docs/wiring.md) for module details and
+[docs/evaluation.md](docs/evaluation.md) for the pre-registered evaluation
+criterion.
 
 ## Synthetic data disclaimer
 

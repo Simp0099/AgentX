@@ -1,44 +1,86 @@
-PDF report extracted text (pypdf):
+PDF report verification from one InvestigationRecord
+Image dimensions: 6000x4000; filename: case_<script>alert(1)</script>&sample.png
+Generated files: forensic_report_check_1.pdf, forensic_report_check_2.pdf
 
-Deepfake Tampering Localizer
- Image: sample_<script>alert(1)</script>&record.jpg
-Goal: PDF extraction check
-Verdict: Not flagged by this detector
- Threshold: 0.5
+Extracted text:
+---
+Page 1
+ Deepfake Forensic Investigation
+ Structured report generated from stored tool results
+Cover
+Report ID: phase5-pdf-check
+UTC timestamp: 2026-10-27T00:00:00Z
+Scope: quick_check:
+Outcome: Not flagged by this detector
 
+Page 2
+Image identity
+Image: case_&lt;script&gt;alert(1)&lt;/script&gt;&amp;sample.png
+SHA-256: b349742d0a08a553905e0694bc3705abff7d38388014bdfb499e899955d251c9
+Dimensions: 6000 x 4000
+Format: JPEG
+Byte size: 375628
 Evidence
- Format: JPEG
-Dimensions: 128x128
-Mode: RGB
+Image thumbnail
 EXIF: absent
-Tampered score (uncalibrated): 0.250
-Region: No region reported.
-Checks Executed
-  inspect_image: executed
- run_localizer: executed
-Checks not run:
- - validate_prediction not needed (baseline suffice)
-- generate_ela not needed (baseline suffice)
-- inspect_metadata not needed (baseline suffice)
-- compare_evidence not needed (baseline suffice)
 
+Page 3
+Model output
+tampered score (uncalibrated): 0.25
+Threshold used: 0.5
+Bounding box: not reported
+Model version: stub-model-v1
+Additional checks
+inspect_metadata (ok): {"absent_fields": ["Make", "Model"], "exif_status": "absent", "parse_errors": [], "present_fields": []}
+
+Page 4
+Observed facts
+Image inspection valid: True
+Image dimensions: 6000 x 4000
+Localizer score: 0.25
+Prediction validation: True; issues: []
 Interpretation
- Verdict: Not flagged by this detector
-Reasons:
-  score below threshold
+score below threshold
 
+Page 5
 Limitations
- Trained on CASIA v2 splices. Heavy re-compression, screenshots, and social-media re-encoding wash out the ELA
-signal. Modern fully-generated images have no splice boundary at all. Treat output as a signal, not proof.
+- tampered score is uncalibrated
 
-Audit Trail
- Investigation ID: pdf-check-001
-Model version: controlled-stub
-Config snapshot hash: fixed
-Created: 2026-01-01T00:00:00Z
+Page 6
+Audit trail
+inspect_image - ok
+Timestamp: 2026-10-27T10:26:27.637054+00:00
+Duration (ms): not reported
+Arguments: {"path": "/private/tmp/pdf_report_source.jpg"}
+Result: {"byte_size": 375628, "format": "JPEG", "height": 4000, "mode": "RGB", "path": "/private/tmp/pdf_report_source.jpg", "sha256": "
+b349742d0a08a553905e0694bc3705abff7d38388014bdfb499e899955d251c9", "valid": true, "width": 6000}
+Error / rationale: none
+run_localizer - ok
+Timestamp: 2026-10-27T10:26:27.637147+00:00
+Duration (ms): not reported
+Arguments: {"path": "/private/tmp/pdf_report_source.jpg", "threshold": 0.5}
+Result: {"bbox": null, "model_version": "stub-model-v1", "tampered_prob": 0.25}
+Error / rationale: none
+validate_prediction - ok
+Timestamp: 2026-10-27T10:26:27.637149+00:00
+Duration (ms): not reported
+Arguments: {"raw_score": 0.25}
+Result: {"issues": [], "valid": true}
+Error / rationale: none
+inspect_metadata - ok
+Timestamp: 2026-10-27T10:26:27.637151+00:00
+Duration (ms): not reported
+Arguments: {"path": "/private/tmp/pdf_report_source.jpg"}
+Result: {"absent_fields": ["Make", "Model"], "exif_status": "absent", "parse_errors": [], "present_fields": []}
+Error / rationale: none
+Config snapshot hash: phase5-fixed
+Config snapshot: {"forensics": {"ela_temp_dir": "/private/tmp", "report_asset_roots": ["/private/tmp"], "report_limitations": ["tampered score is
+uncalibrated"]}}
 
+---
 
-Verification:
-- Escaped filename present in extracted text: PASS
-- EXIF line `EXIF: absent`: PASS
-- Re-generated extracted text identical: PASS
+Checks:
+- Escaped filename in extracted text: PASS
+- EXIF absent line in extracted text: PASS
+- Identical extracted text after regeneration: PASS
+- 6000x4000 image thumbnail embedded: PASS

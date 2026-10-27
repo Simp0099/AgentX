@@ -67,8 +67,10 @@ class SummaryBuilder:
 
             if bbox:
                 xmin, ymin, xmax, ymax = bbox
-                lines.append(f"Region: [{xmin:.3f}, {ymin:.3f}, {xmax:.3f}, {ymax:.3f}] "
-                            f"(normalized coordinates).")
+                lines.append(
+                    f"Region: [{xmin:.3f}, {ymin:.3f}, {xmax:.3f}, {ymax:.3f}] "
+                    f"(normalized coordinates)."
+                )
             else:
                 lines.append("No region reported.")
         else:
@@ -82,8 +84,14 @@ class SummaryBuilder:
         lines.append(f"Checks run: {', '.join(checked)}.")
 
         # Checks not run
-        all_tools = ["inspect_image", "run_localizer", "validate_prediction",
-                     "generate_ela", "inspect_metadata", "compare_evidence"]
+        all_tools = [
+            "inspect_image",
+            "run_localizer",
+            "validate_prediction",
+            "generate_ela",
+            "inspect_metadata",
+            "compare_evidence",
+        ]
         not_run = [t for t in all_tools if t not in checked]
         if not_run:
             reasons = []
@@ -98,16 +106,24 @@ class SummaryBuilder:
 
         Returns True if all numbers match, False otherwise.
         """
-        summary = self.build()
-        allowed = {round(float(self.record.threshold), 3)}
-        for obs in self.record.observations:
-            result = obs.result or {}
-            if obs.tool == "run_localizer":
-                if result.get("tampered_prob") is not None:
-                    allowed.add(round(float(result["tampered_prob"]), 3))
-                bbox = result.get("bbox")
-                if bbox:
-                    allowed.update(round(float(value), 3) for value in bbox)
-        number_tokens = re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?", summary)
-        numbers = [round(float(value), 3) for value in number_tokens]
-        return all(number in allowed for number in numbers)
+        return self.is_grounded(self.build())
+
+    def is_grounded(self, summary: str) -> bool:
+        """Check that every numeric token occurs in numeric record data."""
+        allowed = set()
+
+        def collect(value):
+            if isinstance(value, bool) or value is None:
+                return
+            if isinstance(value, (int, float)):
+                allowed.add(round(float(value), 3))
+            elif isinstance(value, dict):
+                for nested in value.values():
+                    collect(nested)
+            elif isinstance(value, (list, tuple)):
+                for nested in value:
+                    collect(nested)
+
+        collect(self.record.to_dict())
+        tokens = re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?", summary)
+        return all(round(float(token), 3) in allowed for token in tokens)

@@ -1,14 +1,5 @@
-Command: python scripts/evaluate_agent.py
-
-Generating 50 synthetic records...
-  Tampered: 25, Authentic: 25
-Evaluation results written to: results/eval_synthetic.json
-Baseline not-flagged rate: 0.00%
-Policy not-flagged rate: 0.00%
-Improvement: 0.00 percentage points
-Meets 5pp target: NO
-Authentic false flag rate: 0.00%
-
+Generating synthetic_records() with n_per_class=6...
+Evaluation results written to: /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main/results/eval_synthetic.json
 Evaluation label: PLUMBING ONLY
 Criterion status: NOT EVALUATED
-Reason: no locally labeled real re-encoded, low-contrast splice subset exists. This script uses synthetic hand-authored observations and both arms call the same decide() function; it is not the preregistered comparison. The 95% bootstrap CI was not run.
+Synthetic records evaluated: 12

@@ -8,11 +8,13 @@ from pathlib import Path
 from PIL import Image
 
 from agent.config import get_config
+from agent.schemas import ToolResult
 from agent.tools.common import run_bounded
 
 
-def inspect_image(path: str | Path, timeout: float | None = None):
+def inspect_image(path: str | Path, timeout: float | None = None) -> ToolResult:
     """Validate and inspect a local image without raising to the caller."""
+
     def work():
         cfg = get_config().get("forensics", {})
         file_path = Path(path)
@@ -30,8 +32,16 @@ def inspect_image(path: str | Path, timeout: float | None = None):
                 raise ValueError("image exceeds configured pixel limit")
             image_format, mode = image.format, image.mode
         digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
-        return {"valid": True, "path": str(file_path), "format": image_format, "width": width,
-                "height": height, "mode": mode, "byte_size": file_path.stat().st_size,
-                "sha256": digest}
+        return {
+            "valid": True,
+            "issues": [],
+            "path": str(file_path),
+            "format": image_format,
+            "width": width,
+            "height": height,
+            "mode": mode,
+            "byte_size": file_path.stat().st_size,
+            "sha256": digest,
+        }
 
     return run_bounded("inspect_image", work, timeout)

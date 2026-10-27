@@ -1,24 +1,22 @@
-"""agent/batch.py: multiple files or ZIP processing with security checks.
+"""Bounded, per-job ZIP batch validation and forensic investigation."""
 
-Security: zip-slip prevention, zip bomb detection (byte counting),
-nested zip, symlink member rejection, mixed valid/corrupt batch,
-and cancellation mid-batch.
+from __future__ import annotations
 
-All operations are offline/CPU-bounded. No network calls.
-"""
-
-import os
 import tempfile
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
-# Maximum bytes to stream from a ZIP file before aborting.
-# This prevents zip bomb attacks (e.g. 4GB zipped from 99 bytes).
-MAX_ZIP_STREAM_BYTES = 10_000_000  # 10 MB
+from PIL import Image
+
+from agent.config import get_config
 
 
 class BatchStatus:
-    """Status values for batch processing."""
+    """Lifecycle values displayed for batch processing."""
+
     QUEUED = "Queued"
     VALIDATING = "Validating"
     PROCESSING = "Processing"
@@ -30,252 +28,395 @@ class BatchStatus:
 
 
 def _make_zip_with_member(filenames_and_content):
-    """Helper: create a ZIP in memory with given files.
-
-    Returns (zip_bytes, member_filenames) for testing.
-    """
+    """Create a small in-memory ZIP for tests."""
     import io
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w") as zz:
-        for fname, content in filenames_and_content:
-            zz.writestr(fname, content)
-    zip_buf.seek(0)
-    return zip_buf.read(), [fname for fname, _ in filenames_and_content]
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for filename, content in filenames_and_content:
+            archive.writestr(filename, content)
+    return buffer.getvalue(), [filename for filename, _ in filenames_and_content]
+
+
+def _member_name_is_unsafe(filename: str) -> bool:
+    normalized = unquote(filename).replace("\\", "/")
+    path = PurePosixPath(normalized)
+    return (
+        normalized.startswith("/")
+        or bool(path.parts and ":" in path.parts[0])
+        or ".." in path.parts
+    )
 
 
 def _check_zip_slip(member_filenames):
-    """Check for zip-slip paths (traversal outside extraction directory).
-
-    Returns True if any member is unsafe.
-    """
-    for filename in member_filenames:
-        # Check for path traversal
-        normalized = unquote(filename).replace("\\", "/")
-        if ".." in normalized.split("/") or normalized.startswith("/"):
-            return True
-    return False
+    return any(_member_name_is_unsafe(filename) for filename in member_filenames)
 
 
-def _check_zip_bomb(member_count):
-    """Check for zip bomb indicators.
-
-    Returns True if the zip appears to be a bomb (too many members).
-    """
+def _check_zip_bomb(member_count, compressed_bytes=0, uncompressed_bytes=0, max_ratio=100):
     if member_count > 5000:
         return True
-    return False
+    if uncompressed_bytes <= 0:
+        return False
+    return uncompressed_bytes / max(compressed_bytes, 1) > max_ratio
 
 
 def _has_symlink_member(zip_bytes):
-    """Check Unix mode bits of ZIP members for symlinks."""
     import io
 
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-        return any((member.external_attr >> 16) & 0o170000 == 0o120000
-                   for member in archive.infolist())
+        return any(
+            ((member.external_attr >> 16) & 0o170000) == 0o120000 for member in archive.infolist()
+        )
 
 
-def process_batch(zip_path: str, work_dir: str, cancel_flag: dict = None) -> dict:
-    """Process a ZIP file containing images for tamper analysis.
+def _forensics_config():
+    return get_config().get("forensics", {})
 
-    Returns a dict with:
-    - status: BatchStatus value
-    - results: list of per-file results
-    - error: error message if any
-    """
-    cancel_flag = cancel_flag or {"cancelled": False}
-    results = []
-    tmp_dir = tempfile.mkdtemp(prefix="batch_")
 
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zz:
-            members = zz.infolist()
-            member_count = len(members)
+def _tool_error(name: str, error: str) -> dict:
+    return {"filename": name, "status": BatchStatus.FAILED, "error": error}
 
-            # Check for zip-slip paths
-            member_filenames = [m.filename for m in members]
-            if _check_zip_slip(member_filenames):
-                return {
-                    "status": BatchStatus.FAILED,
-                    "results": [],
-                    "error": "ZIP-slip detected: path traversal in ZIP members",
-                }
 
-            # Check for zip bomb indicators
-            if _check_zip_bomb(member_count):
-                return {
-                    "status": BatchStatus.FAILED,
-                    "results": [],
-                    "error": "ZIP bomb detected: excessive members",
-                }
+def _analyze_extracted(path: Path, original_name: str, detector, image_index: int) -> dict:
+    from agent.orchestrator import run_investigation
 
-            # Check for symlink members
-            for member in members:
-                if ((member.external_attr >> 16) & 0o170000) == 0o120000:
-                    return {
-                        "status": BatchStatus.FAILED,
-                        "results": [],
-                        "error": "ZIP contains symlink members (rejected for security)",
-                    }
-                if member.is_dir():
-                    continue
-                if member.filename.lower().endswith(".zip"):
-                    return {"status": BatchStatus.FAILED, "results": [],
-                            "error": "Nested ZIP archives are not accepted"}
-                if os.path.splitext(member.filename)[1].lower() not in {
-                    ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"
-                }:
-                    return {"status": BatchStatus.FAILED, "results": [],
-                            "error": "Non-image ZIP member rejected"}
+    events = [BatchStatus.QUEUED, BatchStatus.VALIDATING, BatchStatus.PROCESSING]
+    record = run_investigation(
+        str(path),
+        goal="quick_check",
+        config={
+            "max_tool_calls_per_image": int(_forensics_config().get("max_tool_calls_per_image", 10))
+        },
+        detector=detector,
+    )
+    if any(
+        obs.tool in ("generate_ela", "inspect_metadata", "compare_evidence")
+        for obs in record.observations
+    ):
+        events.append(BatchStatus.ADDITIONAL_CHECK)
+    if record.verdict is None:
+        status = BatchStatus.FAILED
+    elif record.verdict.value == "Inconclusive":
+        status = BatchStatus.INCONCLUSIVE
+    else:
+        status = BatchStatus.COMPLETED
+    events.append(status)
+    record.filename = original_name
+    return {
+        "filename": original_name,
+        "status": status,
+        "events": events,
+        "verdict": record.verdict.value if record.verdict else "Inconclusive",
+        "tampered_prob": next(
+            (
+                (obs.result or {}).get("tampered_prob")
+                for obs in record.observations
+                if obs.tool == "run_localizer"
+            ),
+            None,
+        ),
+        "record": record,
+    }
 
-            # Extract members safely
-            total_streamed = 0
-            for member in members:
-                if cancel_flag.get("cancelled"):
-                    return {
-                        "status": BatchStatus.CANCELLED,
-                        "results": results,
-                        "error": "Batch processing cancelled mid-extraction",
-                    }
 
-                # Skip directories
-                if member.is_dir():
-                    continue
+def _prepare_members(archive: zipfile.ZipFile, config: dict) -> tuple[list, str | None]:
+    members = [member for member in archive.infolist() if not member.is_dir()]
+    if len(members) > int(config.get("max_zip_members", 100)):
+        return [], "ZIP contains too many files"
+    if any(_member_name_is_unsafe(member.filename) for member in members):
+        return [], "ZIP-slip detected: unsafe member path"
+    if any(((member.external_attr >> 16) & 0o170000) == 0o120000 for member in members):
+        return [], "ZIP contains a symlink member"
+    total_header_size = sum(member.file_size for member in members)
+    total_compressed_size = sum(member.compress_size for member in members)
+    if _check_zip_bomb(
+        len(members),
+        total_compressed_size,
+        total_header_size,
+        float(config.get("max_zip_compression_ratio", 100)),
+    ):
+        return [], "ZIP bomb detected: compression ratio exceeds configured limit"
+    supported = set(
+        config.get(
+            "supported_image_extensions",
+            [
+                ".jpg",
+                ".jpeg",
+                ".png",
+                ".tif",
+                ".tiff",
+                ".bmp",
+                ".webp",
+            ],
+        )
+    )
+    for member in members:
+        suffix = Path(member.filename).suffix.lower()
+        if suffix == ".zip":
+            return [], "Nested ZIP archives are not accepted"
+        if suffix not in supported:
+            return [], "Non-image ZIP member rejected"
+    return members, None
 
-                filename = os.path.basename(member.filename)
-                out_path = os.path.join(tmp_dir, filename)
 
-                # Create parent directories
-                os.makedirs(os.path.dirname(out_path), exist_ok=True)
-
-                # Extract the file, with bomb detection
-                bytes_read = 0
-                with zz.open(member) as source, open(out_path, "wb") as target:
-                    while True:
-                        data = source.read(8192)
-                        if not data:
-                            break
-                        bytes_read += len(data)
-                        total_streamed += len(data)
-                        if total_streamed > MAX_ZIP_STREAM_BYTES:
-                            return {
-                                "status": BatchStatus.FAILED,
-                                "results": results,
-                                "error": (
-                                    f"ZIP bomb: file exceeded "
-                                    f"{MAX_ZIP_STREAM_BYTES/1e6}MB limit"
-                                ),
-                            }
-                        target.write(data)
-
-                results.append({
-                    "filename": filename,
-                    "path": out_path,
-                    "status": "processed",
-                    "size": bytes_read,
-                })
-
-    except zipfile.BadZipFile:
+def process_batch(
+    zip_path: str,
+    work_dir: str,
+    cancel_flag: dict | None = None,
+    detector=None,
+) -> dict:
+    """Validate and investigate every archive image using generated safe names."""
+    cancel_flag = cancel_flag if cancel_flag is not None else {"cancelled": False}
+    config = _forensics_config()
+    limits = {
+        "compressed": int(config.get("max_zip_compressed_bytes", 25_000_000)),
+        "uncompressed": int(config.get("max_zip_uncompressed_bytes", 100_000_000)),
+        "members": int(config.get("max_zip_members", 100)),
+        "pixels": int(config.get("max_image_pixels", 40_000_000)),
+        "seconds": float(config.get("max_batch_processing_seconds", 120)),
+        "workers": max(1, int(config.get("batch_workers", 2))),
+    }
+    started = time.monotonic()
+    archive_path = Path(zip_path)
+    if not archive_path.is_file():
+        return {"status": BatchStatus.FAILED, "results": [], "error": "ZIP file does not exist"}
+    if archive_path.stat().st_size > limits["compressed"]:
         return {
             "status": BatchStatus.FAILED,
             "results": [],
-            "error": "Invalid ZIP file",
+            "error": "ZIP exceeds compressed-byte limit",
         }
-    except Exception as e:
-        return {
-            "status": BatchStatus.FAILED,
-            "results": results,
-            "error": str(e),
-        }
-    finally:
-        # Cleanup temp dir if not cancelled
-        import shutil
-        if not cancel_flag.get("cancelled"):
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    # Batch completed
-    return {
-        "status": BatchStatus.COMPLETED,
-        "results": results,
-        "error": None,
-    }
-
-
-def process_mixed_batch(zip_path: str, work_dir: str, cancel_flag: dict = None) -> dict:
-    """Process a ZIP with mixed valid and corrupt files.
-
-    The batch completes even if some files are corrupt.
-    """
-    cancel_flag = cancel_flag or {"cancelled": False}
+    destination = Path(work_dir)
+    destination.mkdir(parents=True, exist_ok=True)
     results = []
-    tmp_dir = tempfile.mkdtemp(prefix="mixed_batch_")
-
+    records = []
     try:
-        with zipfile.ZipFile(zip_path, "r") as zz:
-            for member in zz.infolist():
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            members, validation_error = _prepare_members(archive, limits | config)
+            if validation_error:
+                return {"status": BatchStatus.FAILED, "results": [], "error": validation_error}
+            if not members:
+                return {"status": BatchStatus.COMPLETED, "results": [], "error": None}
+
+            with tempfile.TemporaryDirectory(prefix="job_", dir=destination) as temp_name:
+                job_dir = Path(temp_name)
+                prepared = []
+                total_streamed = 0
+                for index, member in enumerate(members, start=1):
+                    if cancel_flag.get("cancelled"):
+                        return {
+                            "status": BatchStatus.CANCELLED,
+                            "results": results,
+                            "error": "Batch processing cancelled during extraction",
+                        }
+                    if time.monotonic() - started > limits["seconds"]:
+                        return {
+                            "status": BatchStatus.CANCELLED,
+                            "results": results,
+                            "error": "Batch processing time limit exceeded",
+                        }
+                    suffix = Path(member.filename).suffix.lower()
+                    safe_path = job_dir / f"image_{index:06d}{suffix}"
+                    first_bytes = b""
+                    actual_size = 0
+                    try:
+                        with archive.open(member) as source, safe_path.open("wb") as target:
+                            while chunk := source.read(64 * 1024):
+                                if not first_bytes:
+                                    first_bytes = chunk[:4]
+                                actual_size += len(chunk)
+                                total_streamed += len(chunk)
+                                if total_streamed > limits["uncompressed"]:
+                                    return {
+                                        "status": BatchStatus.FAILED,
+                                        "results": results,
+                                        "error": "ZIP exceeds streamed uncompressed-byte limit",
+                                    }
+                                target.write(chunk)
+                        if first_bytes.startswith(b"PK\x03\x04") or first_bytes.startswith(
+                            b"PK\x05\x06"
+                        ):
+                            return {
+                                "status": BatchStatus.FAILED,
+                                "results": results,
+                                "error": "Nested ZIP content is not accepted",
+                            }
+                        with Image.open(safe_path) as image:
+                            width, height = image.size
+                            if width <= 0 or height <= 0 or width * height > limits["pixels"]:
+                                raise ValueError("image dimensions exceed configured limit")
+                            image.verify()
+                        prepared.append(
+                            {
+                                "path": safe_path,
+                                "filename": member.filename,
+                                "width": width,
+                                "height": height,
+                                "size": actual_size,
+                            }
+                        )
+                    except Exception as exc:  # a corrupt image remains a per-file failure
+                        results.append(_tool_error(member.filename, str(exc)))
+
+                if not prepared:
+                    return {"status": BatchStatus.COMPLETED, "results": results, "error": None}
+
+                if detector is None:
+                    try:
+                        from src.inference import TamperingDetector
+
+                        model_config = get_config()
+                        checkpoint_dir = model_config.get("output", {}).get(
+                            "checkpoint_dir", "checkpoints/"
+                        )
+                        checkpoint_name = model_config.get("output", {}).get(
+                            "checkpoint_name", "best_localizer.keras"
+                        )
+                        detector = TamperingDetector(str(Path(checkpoint_dir) / checkpoint_name))
+                    except Exception as exc:
+                        detector_error = f"detector unavailable: {type(exc).__name__}"
+                    else:
+                        detector_error = ""
+                else:
+                    detector_error = ""
+
+                if detector_error:
+                    results.extend(
+                        _tool_error(item["filename"], detector_error) for item in prepared
+                    )
+                else:
+                    future_map = {}
+                    with ThreadPoolExecutor(max_workers=limits["workers"]) as pool:
+                        for index, item in enumerate(prepared, start=1):
+                            if cancel_flag.get("cancelled"):
+                                break
+                            if time.monotonic() - started > limits["seconds"]:
+                                break
+                            future = pool.submit(
+                                _analyze_extracted, item["path"], item["filename"], detector, index
+                            )
+                            future_map[future] = item
+                        try:
+                            for future in as_completed(
+                                future_map,
+                                timeout=max(0.01, limits["seconds"] - (time.monotonic() - started)),
+                            ):
+                                if cancel_flag.get("cancelled"):
+                                    for pending in future_map:
+                                        pending.cancel()
+                                    break
+                                item = future_map[future]
+                                try:
+                                    result = future.result()
+                                    results.append(result)
+                                    if result.get("record"):
+                                        records.append(result["record"])
+                                except Exception as exc:
+                                    results.append(_tool_error(item["filename"], str(exc)))
+                        except TimeoutError:
+                            for future in future_map:
+                                future.cancel()
+                            results.extend(
+                                _tool_error(
+                                    item["filename"], "batch processing time limit exceeded"
+                                )
+                                for future, item in future_map.items()
+                                if not future.done()
+                            )
+
                 if cancel_flag.get("cancelled"):
                     return {
                         "status": BatchStatus.CANCELLED,
                         "results": results,
-                        "error": "Batch processing cancelled mid-stream",
+                        "error": "Batch processing cancelled",
                     }
-
-                if member.is_dir():
-                    continue
-
-                filename = os.path.basename(member.filename)
-                out_path = os.path.join(tmp_dir, filename)
-
-                try:
-                    with zz.open(member) as source, open(out_path, "wb") as target:
-                        bytes_read = 0
-                        while True:
-                            data = source.read(8192)
-                            if not data:
-                                break
-                            bytes_read += len(data)
-                            target.write(data)
-
-                    # Try to verify it's a valid image
-                    from PIL import Image
+                if time.monotonic() - started > limits["seconds"]:
+                    return {
+                        "status": BatchStatus.CANCELLED,
+                        "results": results,
+                        "error": "Batch processing time limit exceeded",
+                    }
+                if records:
                     try:
-                        img = Image.open(out_path)
-                        img.verify()
-                        results.append({
-                            "filename": filename,
-                            "path": out_path,
-                            "status": "valid",
-                            "size": bytes_read,
-                        })
-                    except Exception:
-                        # Corrupt image - still recorded
-                        results.append({
-                            "filename": filename,
-                            "path": out_path,
-                            "status": "corrupt",
-                            "size": bytes_read,
-                        })
-                except Exception as e:
-                    results.append({
-                        "filename": filename,
-                        "path": None,
-                        "status": "error",
-                        "error": str(e),
-                        "size": 0,
-                    })
-    except Exception as e:
-        return {
-            "status": BatchStatus.FAILED,
-            "results": results,
-            "error": str(e),
-        }
-    finally:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        from agent.reporting import generate_batch_pdf
 
-    # Batch completes with mixed statuses
-    return {
-        "status": BatchStatus.COMPLETED,
-        "results": results,
-        "error": None,
-    }
+                        pdf_path = destination / f"batch_{int(time.time())}.pdf"
+                        generate_batch_pdf(records, pdf_path)
+                        return {
+                            "status": BatchStatus.COMPLETED,
+                            "results": results,
+                            "error": None,
+                            "batch_pdf": str(pdf_path),
+                        }
+                    except Exception as exc:
+                        return {
+                            "status": BatchStatus.COMPLETED,
+                            "results": results,
+                            "error": f"batch PDF unavailable: {type(exc).__name__}",
+                        }
+    except zipfile.BadZipFile:
+        return {"status": BatchStatus.FAILED, "results": [], "error": "Invalid ZIP file"}
+    except Exception as exc:
+        return {"status": BatchStatus.FAILED, "results": results, "error": str(exc)}
+    return {"status": BatchStatus.COMPLETED, "results": results, "error": None}
+
+
+def process_mixed_batch(zip_path: str, work_dir: str, cancel_flag: dict | None = None) -> dict:
+    """Validation-only batch variant used to report valid and corrupt members."""
+    cancel_flag = cancel_flag if cancel_flag is not None else {"cancelled": False}
+    config = _forensics_config()
+    destination = Path(work_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    results = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            members, error = _prepare_members(archive, config)
+            if error:
+                return {"status": BatchStatus.FAILED, "results": [], "error": error}
+            with tempfile.TemporaryDirectory(prefix="mixed_job_", dir=destination) as temp_name:
+                job_dir = Path(temp_name)
+                total = 0
+                limit = int(config.get("max_zip_uncompressed_bytes", 100_000_000))
+                for index, member in enumerate(members, start=1):
+                    if cancel_flag.get("cancelled"):
+                        return {
+                            "status": BatchStatus.CANCELLED,
+                            "results": results,
+                            "error": "Batch processing cancelled mid-batch",
+                        }
+                    path = job_dir / f"image_{index:06d}{Path(member.filename).suffix.lower()}"
+                    count = 0
+                    with archive.open(member) as source, path.open("wb") as target:
+                        while chunk := source.read(64 * 1024):
+                            count += len(chunk)
+                            total += len(chunk)
+                            if total > limit:
+                                return {
+                                    "status": BatchStatus.FAILED,
+                                    "results": results,
+                                    "error": "ZIP exceeds streamed uncompressed-byte limit",
+                                }
+                            target.write(chunk)
+                    try:
+                        with Image.open(path) as image:
+                            width, height = image.size
+                            if width * height > int(config.get("max_image_pixels", 40_000_000)):
+                                raise ValueError("image dimensions exceed configured limit")
+                            image.verify()
+                        status = "valid"
+                    except Exception:
+                        status = "corrupt"
+                    results.append(
+                        {
+                            "filename": member.filename,
+                            "status": status,
+                            "size": count,
+                            "width": width if status == "valid" else None,
+                            "height": height if status == "valid" else None,
+                        }
+                    )
+    except zipfile.BadZipFile:
+        return {"status": BatchStatus.FAILED, "results": [], "error": "Invalid ZIP file"}
+    except Exception as exc:
+        return {"status": BatchStatus.FAILED, "results": results, "error": str(exc)}
+    return {"status": BatchStatus.COMPLETED, "results": results, "error": None}

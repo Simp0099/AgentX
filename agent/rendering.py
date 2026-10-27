@@ -22,7 +22,8 @@ def render_record(record) -> str:
     ]
     score_line = (
         f"**tampered score (uncalibrated):** {float(scores[0]):.3f}"
-        if scores else "**tampered score (uncalibrated):** unavailable"
+        if scores
+        else "**tampered score (uncalibrated):** unavailable"
     )
     return (
         f"### Verdict: {escape_untrusted(verdict)}\n\n"

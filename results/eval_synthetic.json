@@ -1,38 +1,91 @@
 {
-  "evaluation_timestamp": "2026-01-01T00:00:00Z",
-  "n_records_generated": 50,
-  "n_tampered": 25,
-  "n_authentic": 25,
-  "baseline": {
-    "not_flagged_tampered_count": 0,
-    "tampered_total": 25,
-    "not_flagged_rate_percent": 0.0
-  },
-  "policy": {
-    "not_flagged_tampered_count": 0,
-    "tampered_total": 25,
-    "not_flagged_rate_percent": 0.0
-  },
-  "improvement": {
-    "percentage_points": 0.0,
-    "meets_target": false
-  },
-  "authentic_handling": {
-    "n_authentic": 0,
-    "false_flag_rate_percent": 0.0
-  },
   "criterion": {
-    "target_reduction_percent": 5.0,
-    "meets_criterion": false
+    "bootstrap_confidence_interval_95": null,
+    "bootstrap_seed": 42,
+    "status": "NOT EVALUATED",
+    "target_reduction_percentage_points": 5,
+    "zero_excluded": null
   },
-  "method": {
-    "synthetic_data": "generated offline CPU, no network, weights=None",
-    "pipeline": "deterministic via agent.verdict.decide",
-    "records": "synthetic with re-encoding and low-contrast manipulations",
-    "scope_note": "plumbing check only; both arms call the same decide() function, no model inference, not evidence about real forgeries"
-  },
-  "evaluation_status": "PLUMBING ONLY",
   "criterion_status": "NOT EVALUATED",
-  "criterion_status_reason": "No locally labeled real subset identifies tampered images that are both re-encoded and low-contrast; synthetic records do not satisfy the criterion.",
-  "statistical_method_status": "NOT RUN: no real labeled hard-subset comparison; the bootstrap confidence interval is not estimable from this plumbing run."
+  "criterion_status_reason": "CASIA2 labels exist locally, but no manifest identifies a real subset tagged as both re-encoded and low-contrast; synthetic records cannot evaluate the pre-registered criterion.",
+  "evaluation_status": "PLUMBING ONLY",
+  "limitations": [
+    "Synthetic records and transformations are plumbing checks, not benchmark evidence.",
+    "The registered hard-subset metric and bootstrap interval were not evaluated.",
+    "The optional LLM planner and token metrics were disabled."
+  ],
+  "n_hard_subset": 0,
+  "synthetic_plumbing": {
+    "agent_metrics": {
+      "ambiguous_subset_inconclusive_rate": 0.0,
+      "llm_status": "disabled for offline plumbing run",
+      "llm_tokens_per_investigation": null,
+      "mean_latency_ms_baseline": 268.99,
+      "mean_latency_ms_full": 266.93,
+      "summary_grounding_rate_baseline": 1.0,
+      "summary_grounding_rate_full": 1.0,
+      "tool_selection_relevance_f1": 1.0,
+      "unnecessary_call_rate": 0.0,
+      "workflow_completion_rate": 1.0
+    },
+    "baseline_not_flagged_tampered": {
+      "count": 6,
+      "rate_percent": 100.0,
+      "total": 6
+    },
+    "batch_resilience": {
+      "batch_completed": true,
+      "injected_corrupt_member": true,
+      "status": "Completed",
+      "valid_member_retained": true
+    },
+    "classification_metrics": {
+      "accuracy": 0.5,
+      "macro_f1": 0.3333,
+      "n": 12,
+      "roc_auc": 0.9722,
+      "threshold": 0.5
+    },
+    "dataset_manifest": {
+      "designated_ambiguous_subset": 6,
+      "hard_subset_transform": "tampered patch contrast blended toward surrounding mean; all images JPEG re-encoded twice",
+      "records": 12,
+      "source": "src.data.dataset.synthetic_records",
+      "synthetic_records_per_class": 6
+    },
+    "difference_percentage_points": 0.0,
+    "full_policy_not_flagged_tampered": {
+      "count": 6,
+      "rate_percent": 100.0,
+      "total": 6
+    },
+    "localization_mean_iou_on_tampered": 0.161,
+    "predictor": "local trained checkpoint",
+    "systems": {
+      "A": {
+        "classification_metrics": {
+          "accuracy": 0.5,
+          "macro_f1": 0.3333,
+          "n": 12,
+          "roc_auc": 0.9722,
+          "threshold": 0.5
+        },
+        "localization_mean_iou_on_tampered": 0.161,
+        "name": "fixed baseline checks only, deterministic verdict",
+        "tampered_not_flagged_rate_percent": 100.0
+      },
+      "B": {
+        "llm_tokens_per_investigation": null,
+        "name": "baseline checks plus grounded template summary; LLM unavailable",
+        "summary_grounding_rate": 1.0,
+        "tampered_not_flagged_rate_percent": 100.0
+      },
+      "C": {
+        "name": "full conditional policy without an LLM planner",
+        "tampered_not_flagged_rate_percent": 100.0,
+        "tool_selection_relevance_f1": 1.0,
+        "workflow_completion_rate": 1.0
+      }
+    }
+  }
 }
