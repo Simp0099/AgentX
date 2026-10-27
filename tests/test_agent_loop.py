@@ -80,7 +80,7 @@ def test_direct_final_answer_returns_text_and_messages(image):
 def test_tool_result_reaches_the_next_request(image):
     client = FakeClient(
         [
-            make_message(tool_calls=[_inspect_call(image)]),
+            make_message(content="I will inspect the file before judging it.", tool_calls=[_inspect_call(image)]),
             make_message(content="Two of two."),
         ]
     )
@@ -107,6 +107,8 @@ def test_tool_result_reaches_the_next_request(image):
     # The assistant turn is echoed back so the model can pair call and reply.
     echoed = second["messages"][-2]
     assert echoed["tool_calls"][0]["function"]["name"] == "inspect_image"
+    assert echoed["content"] == "I will inspect the file before judging it."
+    assert second["messages"].index(echoed) < second["messages"].index(tool_msgs[0])
 
 
 def test_record_is_built_from_the_real_tool_calls(image):
