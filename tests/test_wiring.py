@@ -25,3 +25,12 @@ def test_gradio_app_wires_batch_zip_processor():
     assert "from agent.batch import process_batch" in app_text
     assert "def analyze_batch(zip_file):" in app_text
     assert "batch_button.click(analyze_batch" in app_text
+
+
+def test_gradio_app_routes_chat_tab_through_chat_handler():
+    app_text = (ROOT / "app" / "app.py").read_text()
+    handler_text = (ROOT / "app" / "chat_handler.py").read_text()
+
+    assert "from app.chat_handler import agent_chat as _agent_chat" in app_text
+    assert "return _agent_chat(message, image, state, detector=DETECTOR)" in app_text
+    assert "def agent_chat(" in handler_text
