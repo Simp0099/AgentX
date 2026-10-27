@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.17, pytest-9.1.1, pluggy-1.7.0 -- /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main/.venv311/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/bhavishya/Documents/Bhavishya/Code/Projects/Personal Projects/AgentX/AI-Deepfake-Localizer-main
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collecting ... collected 99 items / 89 deselected / 10 selected
+
+tests/test_batch.py::test_zip_slip_detection PASSED                      [ 10%]
+tests/test_batch.py::test_zip_bomb_byte_counting PASSED                  [ 20%]
+tests/test_batch.py::test_symlink_member_rejection PASSED                [ 30%]
+tests/test_batch.py::test_mixed_valid_and_corrupt_batch_completes PASSED [ 40%]
+tests/test_batch.py::test_cancellation_mid_batch PASSED                  [ 50%]
+tests/test_batch.py::test_nested_zip_detection PASSED                    [ 60%]
+tests/test_batch.py::test_max_zip_stream_bytes PASSED                    [ 70%]
+tests/test_batch.py::test_streamed_uncompressed_byte_limit PASSED        [ 80%]
+tests/test_batch.py::test_absolute_zip_path_rejected PASSED              [ 90%]
+tests/test_model.py::test_mixed_batch_loss PASSED                        [100%]
+
+====================== 10 passed, 89 deselected in 20.74s ======================

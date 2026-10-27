@@ -1,0 +1,44 @@
+PDF report extracted text (pypdf):
+
+Deepfake Tampering Localizer
+ Image: sample_<script>alert(1)</script>&record.jpg
+Goal: PDF extraction check
+Verdict: Not flagged by this detector
+ Threshold: 0.5
+
+Evidence
+ Format: JPEG
+Dimensions: 128x128
+Mode: RGB
+EXIF: absent
+Tampered score (uncalibrated): 0.250
+Region: No region reported.
+Checks Executed
+  inspect_image: executed
+ run_localizer: executed
+Checks not run:
+ - validate_prediction not needed (baseline suffice)
+- generate_ela not needed (baseline suffice)
+- inspect_metadata not needed (baseline suffice)
+- compare_evidence not needed (baseline suffice)
+
+Interpretation
+ Verdict: Not flagged by this detector
+Reasons:
+  score below threshold
+
+Limitations
+ Trained on CASIA v2 splices. Heavy re-compression, screenshots, and social-media re-encoding wash out the ELA
+signal. Modern fully-generated images have no splice boundary at all. Treat output as a signal, not proof.
+
+Audit Trail
+ Investigation ID: pdf-check-001
+Model version: controlled-stub
+Config snapshot hash: fixed
+Created: 2026-01-01T00:00:00Z
+
+
+Verification:
+- Escaped filename present in extracted text: PASS
+- EXIF line `EXIF: absent`: PASS
+- Re-generated extracted text identical: PASS

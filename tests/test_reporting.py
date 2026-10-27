@@ -233,3 +233,51 @@ def test_escape_text():
     # Empty and None
     assert _escape_text("") == ""
     assert _escape_text(None) == ""
+
+
+def test_pdf_extracted_text_escaping_absent_exif_and_repeatability(tmp_path):
+    """Extracted PDF text preserves the hostile filename, absent EXIF, and repeatability."""
+    from pypdf import PdfReader
+
+    filename = "sample_<script>alert(1)</script>&record.jpg"
+    record = InvestigationRecord(
+        investigation_id="extract-text-check",
+        image_id="synthetic-image",
+        filename=filename,
+        goal="quick_check",
+        goal_text="",
+        threshold=0.5,
+        config_snapshot_hash="fixed-hash",
+        model_version="stub",
+        observations=[
+            Observation(
+                tool="inspect_image",
+                args={"path": filename},
+                status="ok",
+                result={"valid": True, "format": "JPEG", "width": 64,
+                        "height": 64, "mode": "RGB", "exif": {}},
+            ),
+            Observation(
+                tool="run_localizer",
+                args={"path": filename},
+                status="ok",
+                result={"tampered_prob": 0.25, "bbox": None},
+            ),
+        ],
+        errors=[],
+        rationale="",
+        verdict=Verdict.NOT_FLAGGED_BY_THIS_DETECTOR,
+        verdict_reasons=["score below threshold"],
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+
+    first_pdf = tmp_path / "first.pdf"
+    second_pdf = tmp_path / "second.pdf"
+    generate_pdf(record, first_pdf)
+    first_text = "\n".join(page.extract_text() or "" for page in PdfReader(first_pdf).pages)
+    generate_pdf(record, second_pdf)
+    second_text = "\n".join(page.extract_text() or "" for page in PdfReader(second_pdf).pages)
+
+    assert f"Image: {filename}" in first_text
+    assert "EXIF: absent" in first_text
+    assert first_text == second_text

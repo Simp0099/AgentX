@@ -18,3 +18,10 @@ def test_app_imports_orchestrator_and_is_single_gradio_entrypoint():
         if "gr." + "Blocks(" in source or "gr." + "Interface(" in source:
             gradio_apps.append(path.relative_to(ROOT).as_posix())
     assert gradio_apps == ["app/app.py"]
+
+
+def test_gradio_app_wires_batch_zip_processor():
+    app_text = (ROOT / "app" / "app.py").read_text()
+    assert "from agent.batch import process_batch" in app_text
+    assert "def analyze_batch(zip_file):" in app_text
+    assert "batch_button.click(analyze_batch" in app_text

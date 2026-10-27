@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import gradio as gr  # noqa: E402
 
+from agent.batch import process_batch  # noqa: E402
 from app.handler import analyze as _analyze  # noqa: E402
 
 CHECKPOINT = os.environ.get("CHECKPOINT", "checkpoints/best_localizer.keras")
@@ -24,6 +25,22 @@ except Exception as exc:  # noqa: BLE001 - missing checkpoint is shown in UI
 def analyze(image, threshold):
     """Run investigation through the orchestrator and render its record."""
     return _analyze(image, threshold, detector=DETECTOR)
+
+
+def analyze_batch(zip_file):
+    """Validate and unpack an uploaded image archive through the batch API."""
+    if zip_file is None:
+        return "Upload a ZIP file to begin."
+    zip_path = getattr(zip_file, "name", zip_file)
+    result = process_batch(str(zip_path), "artifacts/batch")
+    lines = [f"Batch status: {result['status']}"]
+    if result.get("error"):
+        lines.append(f"Error: {result['error']}")
+    for item in result.get("results", []):
+        lines.append(f"- {item['filename']}: {item['status']}")
+    if not result.get("results") and not result.get("error"):
+        lines.append("- No image files found.")
+    return "\n".join(lines)
 
 
 DESCRIPTION = """
@@ -56,6 +73,13 @@ with gr.Blocks(title="Deepfake Tampering Localizer") as demo:
     with gr.Row():
         ela_output = gr.Image(label="ELA map")
         detail_output = gr.Markdown()
+
+    gr.Markdown("## Batch ZIP validation")
+    with gr.Row():
+        batch_input = gr.File(label="Upload an image ZIP", file_types=[".zip"])
+        batch_button = gr.Button("Process batch")
+    batch_output = gr.Textbox(label="Batch result", lines=6, interactive=False)
+    batch_button.click(analyze_batch, inputs=[batch_input], outputs=[batch_output])
 
     run.click(analyze, inputs=[image_input, threshold],
               outputs=[ela_output, label_output, overlay_output, detail_output])

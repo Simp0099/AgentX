@@ -1,24 +1,32 @@
 # Gradio demo verification
 
-## Launch command
+Command: `python app/app.py` (Python 3.11.17, `.venv311`). The updated app started successfully.
 
-Command: `python app/app.py` (a temporary PATH shim resolves `python` to Python 3.11.17).
+Command: `curl -i --max-time 10 http://localhost:7860 | head -20`
 
-```text
-Traceback (most recent call last):
-  File "app/app.py", line 9, in <module>
-    import gradio as gr
-ModuleNotFoundError: No module named 'gradio'
-```
-
-The app exited with status 1 before opening the listener.
-
-## HTTP request
-
-Command: `curl -i --max-time 3 http://localhost:7860`
+HTTP status: **200 OK**. First 20 response lines:
 
 ```text
-curl: (7) Failed to connect to localhost port 7860 after 0 ms: Couldn't connect to server
+HTTP/1.1 200 OK
+date: Tue, 27 Oct 2026 08:50:23 GMT
+server: uvicorn
+content-length: 50474
+content-type: text/html; charset=utf-8
+
+<!doctype html>
+<html
+	lang="en"
+	style="
+		margin: 0;
+		padding: 0;
+		min-height: 100%;
+		display: flex;
+		flex-direction: column;
+	"
+	>
+	<head>
+		<meta charset="utf-8" />
+		<base href="./" />
 ```
 
-HTTP status line: **none** (connection refused; server did not start). Response body: **none**. Therefore the UI handler test passes, but live Gradio behavior is not verified in this environment.
+The handler calls `run_investigation()` through `app.handler.analyze` and renders the verdict, the label `tampered score (uncalibrated)`, and executed checks. The batch ZIP controls call `agent.batch.process_batch()`.

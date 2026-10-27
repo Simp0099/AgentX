@@ -105,11 +105,16 @@ def test_mixed_valid_and_corrupt_batch_completes():
 
 def test_cancellation_mid_batch():
     """Batch processing can be cancelled mid-stream."""
-    import threading
-    import time
+    class CancelAfterFirstMember:
+        def __init__(self):
+            self.checks = 0
+
+        def get(self, _key, _default=None):
+            self.checks += 1
+            return self.checks > 1
 
     zip_bytes, _ = _make_zip_with_member(
-        [(f"file_{i:03d}.txt", b"X" * 1000) for i in range(100)]
+        [(f"file_{i:03d}.jpg", b"X" * 1000) for i in range(100)]
     )
 
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
@@ -117,25 +122,9 @@ def test_cancellation_mid_batch():
         tmp.write(zip_bytes)
 
     try:
-        results = {"value": None}
-        cancel_flag = {"cancelled": False}
-
-        def run_process():
-            result = process_batch(zip_path, "/tmp/work", cancel_flag)
-            results["value"] = result
-
-        thread = threading.Thread(target=run_process)
-        thread.start()
-
-        # Cancel after a short delay
-        time.sleep(0.1)
-        cancel_flag["cancelled"] = True
-
-        thread.join(timeout=5)
-
-        # Processing should have been cancelled or completed
-        assert results["value"] is not None
-        print(f"test_cancellation_mid_batch PASSED (status={results['value']['status']})")
+        result = process_batch(zip_path, "/tmp/work", CancelAfterFirstMember())
+        assert result["status"] == BatchStatus.CANCELLED
+        assert len(result["results"]) == 1
     finally:
         os.unlink(zip_path)
 
