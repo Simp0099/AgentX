@@ -8,17 +8,27 @@ from urllib.request import Request, urlopen
 
 from agent.tool_registry import PLANNER_TOOLS
 
+# The planner endpoint is supplied by the environment (name only, no URL here).
+ENV_ENDPOINT = "ANTHROPIC_BASE_URL"
+
 
 class AnthropicPlanner:
     """Small injectable client using the documented Messages HTTP API."""
 
-    endpoint = "https://api.anthropic.com/v1/messages"
-
-    def __init__(self, api_key: str | None = None, model: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        endpoint: str | None = None,
+    ):
         self.api_key = api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY")
         self.model = model if model is not None else os.environ.get("ANTHROPIC_MODEL")
-        if not self.api_key or not self.model:
-            raise RuntimeError("planner credentials or ANTHROPIC_MODEL unavailable")
+        self.endpoint = endpoint if endpoint is not None else os.environ.get(ENV_ENDPOINT)
+        if not self.api_key or not self.model or not self.endpoint:
+            raise RuntimeError(
+                "planner unavailable: ANTHROPIC_API_KEY, ANTHROPIC_MODEL and "
+                f"{ENV_ENDPOINT} must all be set"
+            )
 
     def _message(self, payload: dict) -> dict:
         request = Request(

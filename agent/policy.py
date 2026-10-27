@@ -7,6 +7,11 @@ from agent.schemas import InvestigationRecord, Verdict
 from agent.tool_registry import ToolCall
 from agent.verdict import decide  # noqa: F821
 
+# Baseline checks that must complete before a verdict counts as confident.
+# A localizer score alone is not evidence: without validation the verdict is
+# provisional, so the loop must not stop on it.
+REQUIRED_CHECKS = ("inspect_image", "run_localizer", "validate_prediction")
+
 
 def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     """Return the next check group based only on recorded evidence."""
@@ -71,8 +76,9 @@ class StopPolicy:
 
     The loop stops when any of these hold:
       1. Budget exhausted -- the configured step cap has been reached.
-      2. Evidence consistent -- a confident verdict (not Inconclusive) is
-         already available.
+      2. Evidence consistent -- the baseline checks in ``REQUIRED_CHECKS`` have
+         all completed and a confident verdict (not Inconclusive) is available,
+         with any localization conflict already examined by compare_evidence.
       3. Validation failed -- a required check ended in error/timeout; the
          ``decide`` function reports ``Inconclusive`` (the loop keeps running
          on inconclusive evidence until the budget is exhausted, so the LLM
@@ -82,17 +88,33 @@ class StopPolicy:
     ``Inconclusive`` instead of a confident verdict.
     """
 
-    def should_stop(self, record: InvestigationRecord, max_steps: int | None = None) -> tuple[bool, str]:
+    def should_stop(
+        self, record: InvestigationRecord, max_steps: int | None = None
+    ) -> tuple[bool, str]:
         """Return ``(should_stop, reason)`` for the current investigation state."""
         # 1. Budget exhausted.
         if max_steps is not None and len(record.observations) >= max_steps:
             return True, "budget exhausted"
-        # 2. Evidence consistent -> a confident verdict already exists.
+        # 2. Baseline evidence must be complete: a provisional verdict taken
+        #    from the score alone must not end the loop before validation.
+        completed = {obs.tool for obs in record.observations if obs.status == "ok"}
+        pending = [name for name in REQUIRED_CHECKS if name not in completed]
+        if pending:
+            return False, f"baseline_checks_pending; continue ({', '.join(pending)})"
+        # 3. Evidence consistent -> a confident verdict already exists.
         verdict, _reasons = decide(record)
-        if verdict is not None and verdict != Verdict.INCONCLUSIVE.value:
+        # ``decide`` returns a ``Verdict`` member, not its string value, so
+        # compare against the member itself -- comparing to ``.value`` never
+        # matches and would stop the loop after the first observation.
+        if verdict is not None and verdict != Verdict.INCONCLUSIVE:
+            if (
+                verdict == Verdict.FLAGGED_REGION_UNAVAILABLE
+                and "compare_evidence" not in completed
+            ):
+                return False, "localization_conflict_unresolved; compare_evidence pending"
             return True, "evidence_consistent; confident verdict available"
-        # 3. Validation failed / inconclusive signals -> keep gathering up to
-        #    the budget rather than inventing a verdict.
+        # 4. Inconclusive / conflicting signals -> keep gathering up to the
+        #    budget rather than inventing a verdict.
         return False, "signals_conflict_or_insufficient; continue"
 
     def remaining_budget(self, record: InvestigationRecord) -> int:

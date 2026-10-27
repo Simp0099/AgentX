@@ -1,0 +1,55 @@
+# Agent reasoning engine configuration (Phase 2).
+#
+# This is the only place the agent reads its provider, model, base URL and
+# credential NAME from. No model name or provider URL may appear in agent/*.py;
+# tests/test_agent_config.py enforces that with a source scan.
+#
+# No credential value belongs in this file. `api_key_env` holds the NAME of the
+# environment variable to read, so the key itself stays in the shell or in the
+# gitignored .env.
+#
+# Primary and fallbacks are the measured ranking from docs/model_selection.md:
+# highest tool-call success rate first, ties broken by lower median latency.
+
+agent:
+  # ---- primary (Phase 1 selection) ----
+  provider: openrouter
+  model: "nvidia/nemotron-3.5-lightning:free"
+  base_url: "https://openrouter.ai/api/v1"
+  api_key_env: OPENROUTER_API_KEY
+
+  # ---- fallbacks, in the order they should be tried ----
+  fallback_models:
+    - provider: openrouter
+      model: "nvidia/nemotron-3-ultra-550b-a55b:free"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key_env: OPENROUTER_API_KEY
+    - provider: gemini
+      model: "gemini-3.6-flash"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      api_key_env: GEMINI_API_KEY
+    - provider: gemini
+      model: "gemini-3.5-flash-lite"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      api_key_env: GEMINI_API_KEY
+
+  # ---- loop bounds ----
+  max_steps: 6
+  temperature: 0.0
+  request_timeout_seconds: 30
+  # Re-sending an identical tool call is allowed this many times, then the
+  # loop must change approach or stop, so a confused model cannot spin.
+  max_identical_retries: 2
+  # Self-reflection pass (model reviews its own planned calls before running
+  # them). Off by default: it doubles cost and was not validated in Phase 1.
+  reflection: false
+
+  # ---- memory ----
+  memory:
+    enabled: true
+    path: artifacts/memory/investigations.db
+
+  # ---- conversation history sent to the model ----
+  history:
+    max_messages: 20
+    max_chars: 12000

@@ -14,6 +14,8 @@ checkpoints/*
 *.safetensors
 logs/
 reports/
+# Generated per-investigation evidence (ELA maps, uploads). Test runs write here.
+artifacts/
 
 # Python
 __pycache__/
