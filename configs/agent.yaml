@@ -9,34 +9,40 @@
 # gitignored .env.
 #
 # Primary and fallbacks are the measured ranking from docs/model_selection.md:
-# highest tool-call success rate first, ties broken by lower median latency.
+# Routing order is primary OpenRouter, Gemini, then OpenCode Zen.
+# Runtime routing follows the configured provider order below.
 
 agent:
-  # ---- primary (Phase 1 selection) ----
-  provider: openrouter
-  model: "nvidia/nemotron-3.5-lightning:free"
-  base_url: "https://openrouter.ai/api/v1"
-  api_key_env: OPENROUTER_API_KEY
+  # ---- primary (Gemini) ----
+  provider: gemini
+  model: "gemini-2.5-flash"
+  base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+  api_key_env: GEMINI_API_KEY
+  provider_base_urls:
+    anthropic: "https://api.anthropic.com/v1"
+    openai: "https://api.openai.com/v1"
 
   # ---- fallbacks, in the order they should be tried ----
   fallback_models:
     - provider: openrouter
-      model: "nvidia/nemotron-3-ultra-550b-a55b:free"
+      model: "nvidia/nemotron-3.5-lightning:free"
       base_url: "https://openrouter.ai/api/v1"
       api_key_env: OPENROUTER_API_KEY
     - provider: gemini
-      model: "gemini-3.6-flash"
-      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      model: "gemini-3.8-flash"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
       api_key_env: GEMINI_API_KEY
-    - provider: gemini
-      model: "gemini-3.5-flash-lite"
-      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
-      api_key_env: GEMINI_API_KEY
+    - provider: opencode_zen
+      model: "glm-5.3-flash-free"
+      base_url: "https://opencode.ai/inference/openai/v1"
+      api_key_env: OPENCODE_ZEN_API_KEY
 
   # ---- loop bounds ----
   max_steps: 6
   temperature: 0.0
-  request_timeout_seconds: 30
+  request_timeout_seconds: 15
+  retry_after_max_seconds: 60
+  cooldown_seconds: 900
   # Re-sending an identical tool call is allowed this many times, then the
   # loop must change approach or stop, so a confused model cannot spin.
   max_identical_retries: 2

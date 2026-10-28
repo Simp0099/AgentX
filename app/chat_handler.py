@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -15,17 +18,41 @@ from PIL import Image
 from agent.agent_tools import ToolContext, run_tool
 from agent.loop import AgentResult, run_agent_full
 from agent.memory_store import image_hash
+from agent.reporting import generate_pdf
 from agent.orchestrator import run_investigation
-from agent.rendering import escape_untrusted, render_record
+from agent.prompts import CAVEAT_TEXT
+from agent.rendering import escape_untrusted
 
 UPLOAD_DIR = Path("artifacts/uploads")
 ELA_TOOL_NAME = "generate_ela"
 _MAX_PREVIEW_CHARS = 1200
+_LOGGER = logging.getLogger(__name__)
+
+
+def _llm_failure_reason(details: list[str]) -> str:
+    """Summarize common provider errors without copying credentials to the UI."""
+    text = " ".join(details).casefold()
+    if any(phrase in text for phrase in ("not set", "not found", "missing", "no model credential")):
+        return "missing provider API key"
+    if "timeout" in text or "timed out" in text:
+        return "request timed out"
+    match = re.search(r"\b([45]\d\d)\b", text)
+    if match:
+        return f"provider returned HTTP {match.group(1)}"
+    if "quota" in text or "rate limit" in text or "rate-limit" in text:
+        return "provider quota or rate limit"
+    if "connection" in text or "temporarily unavailable" in text:
+        return "provider connection failed"
+    return "provider request failed"
+
+
+def _upload_dir() -> Path:
+    return Path(os.environ.get("AGENT_UPLOAD_ROOT", str(UPLOAD_DIR))).expanduser()
 
 
 def _managed(path: str | Path) -> Path | None:
     """Return a path only when it is inside the chat upload directory."""
-    root = UPLOAD_DIR.resolve()
+    root = _upload_dir().resolve()
     candidate = Path(path).resolve()
     try:
         candidate.relative_to(root)
@@ -36,7 +63,8 @@ def _managed(path: str | Path) -> Path | None:
 
 def _save_upload(image: Any) -> tuple[Path, str]:
     """Copy an uploaded image to a durable, conversation-owned PNG."""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    upload_dir = _upload_dir()
+    upload_dir.mkdir(parents=True, exist_ok=True)
     if isinstance(image, np.ndarray):
         opened = Image.fromarray(image.astype(np.uint8))
         filename = "upload.png"
@@ -48,7 +76,7 @@ def _save_upload(image: Any) -> tuple[Path, str]:
         filename = source.name
         with Image.open(source) as input_image:
             opened = input_image.copy()
-    destination = UPLOAD_DIR / f"chat-{uuid.uuid4().hex}.png"
+    destination = upload_dir / f"chat-{uuid.uuid4().hex}.png"
     opened.convert("RGB").save(destination, format="PNG")
     return destination.resolve(), filename
 
@@ -56,7 +84,7 @@ def _save_upload(image: Any) -> tuple[Path, str]:
 def _temporary_copy(source: Path) -> Path:
     """Make a per-turn image copy that can be removed after tools finish."""
     with tempfile.NamedTemporaryFile(
-        prefix="chat-turn-", suffix=".png", dir=UPLOAD_DIR, delete=False
+        prefix="chat-turn-", suffix=".png", dir=_upload_dir(), delete=False
     ) as handle:
         destination = Path(handle.name)
     try:
@@ -141,23 +169,179 @@ def _ela_from_record(record: Any) -> Image.Image | None:
 
 
 def _ensure_ela(image_path: Path) -> Image.Image | None:
+    return _ensure_ela_with_path(image_path)[0]
+
+
+def _ensure_ela_with_path(image_path: Path) -> tuple[Image.Image | None, str | None]:
     result = run_tool(
         ELA_TOOL_NAME,
         {"image_path": str(image_path)},
-        ToolContext(upload_root=UPLOAD_DIR.resolve()),
+        ToolContext(upload_root=_upload_dir().resolve()),
     )
     artifact = result.get("artifact")
     if not artifact:
-        return None
+        return None, None
     try:
         with Image.open(artifact) as generated:
-            return generated.copy()
+            return generated.copy(), str(artifact)
     except (OSError, ValueError):
-        return None
+        return None, None
 
 
 def _clean_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [dict(message) for message in messages if message.get("role") != "system"]
+
+
+def _ok_result(record: Any, tool_name: str) -> dict[str, Any] | None:
+    for observation in record.observations:
+        if observation.tool == tool_name and observation.status == "ok":
+            return observation.result or {}
+    return None
+
+
+def _fixed_answer(record: Any) -> str:
+    """Summarize recorded findings and retain the detector limits."""
+    verdict = record.verdict.value if record.verdict else "Inconclusive"
+    localizer = _ok_result(record, "run_localizer")
+    score = localizer.get("tampered_prob") if localizer else None
+    score_text = f"{score}" if isinstance(score, (int, float)) else "unavailable"
+    return (
+        f"Verdict: {verdict}. Tampered score (uncalibrated): {score_text}.\n\n"
+        f"{CAVEAT_TEXT}"
+    )
+
+
+def _structured_reply(
+    record: Any,
+    answer_text: str,
+    tool_log: list[dict[str, str]],
+    mode: str,
+    state: dict[str, Any],
+    generated_ela_path: str | None = None,
+) -> dict[str, Any]:
+    """Build the chat contract from successful tool observations only."""
+    inspected = _ok_result(record, "inspect_image")
+    localized = _ok_result(record, "run_localizer")
+    image_size = localized.get("image_size") if localized else None
+    width = inspected.get("width") if inspected else None
+    height = inspected.get("height") if inspected else None
+    if isinstance(image_size, (list, tuple)) and len(image_size) == 2:
+        width = width if width is not None else image_size[0]
+        height = height if height is not None else image_size[1]
+    width = int(width) if isinstance(width, (int, float)) and width > 0 else None
+    height = int(height) if isinstance(height, (int, float)) and height > 0 else None
+
+    score = localized.get("tampered_prob") if localized else None
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        score = None
+    verdict = record.verdict.value if record.verdict else None
+
+    region = None
+    coverage_percent = None
+    bbox = localized.get("bbox") if localized else None
+    if (
+        verdict == "Flagged for review"
+        and isinstance(bbox, (list, tuple))
+        and len(bbox) == 4
+        and width is not None
+        and height is not None
+        and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in bbox)
+    ):
+        xmin, ymin, xmax, ymax = (float(value) for value in bbox)
+        if 0 <= xmin < xmax <= 1 and 0 <= ymin < ymax <= 1:
+            horizontal = [round(xmin * width), round(xmax * width)]
+            vertical = [round(ymin * height), round(ymax * height)]
+            if horizontal[0] < horizontal[1] and vertical[0] < vertical[1]:
+                region = {"horizontal": horizontal, "vertical": vertical}
+                coverage_percent = round(
+                    (horizontal[1] - horizontal[0])
+                    * (vertical[1] - vertical[0])
+                    / (width * height)
+                    * 100,
+                    1,
+                )
+
+    durations = [
+        observation.duration_ms
+        for observation in record.observations
+        if observation.duration_ms is not None
+        and isinstance(observation.duration_ms, (int, float))
+    ]
+    processing_seconds = round(sum(durations) / 1000, 3) if durations else None
+    ela_path = next(
+        (
+            str((observation.result or {}).get("artifact"))
+            for observation in record.observations
+            if observation.tool == ELA_TOOL_NAME
+            and (observation.result or {}).get("artifact")
+        ),
+        None,
+    )
+    if ela_path is None:
+        ela_path = generated_ela_path
+
+    report_path = None
+    report_url = None
+    try:
+        report_dir = Path.cwd() / "artifacts" / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        candidate = report_dir / f"chat-report-{uuid.uuid4().hex}.pdf"
+        generate_pdf(record, candidate)
+        report_path = str(candidate.resolve())
+        report_url = "/api/assets?path=" + str(candidate.resolve())
+    except Exception:
+        report_path = None
+        report_url = None
+
+    return {
+        "verdict": verdict,
+        "tampered_score_uncalibrated": score,
+        "image": {
+            "filename": record.filename or None,
+            "width": width,
+            "height": height,
+        },
+        "processing_seconds": processing_seconds,
+        "model_version": (localized or {}).get("model_version") or record.model_version,
+        "region": region,
+        "coverage_percent": coverage_percent,
+        "caveat": CAVEAT_TEXT,
+        "answer_text": answer_text,
+        "tool_log": tool_log,
+        "report_path": report_path,
+        "report_url": report_url,
+        "download_url": report_url,
+        "report_download_url": report_url,
+        "download_link": report_url,
+        "report_link": report_url,
+        "ela_image_path": ela_path,
+        "mode": mode,
+        "_state": state,
+    }
+
+
+def _empty_reply(answer_text: str, history: list[dict[str, Any]], mode: str) -> dict[str, Any]:
+    """Return the same structured shape when no image evidence is available."""
+    return {
+        "verdict": None,
+        "tampered_score_uncalibrated": None,
+        "image": {"filename": None, "width": None, "height": None},
+        "processing_seconds": None,
+        "region": None,
+        "coverage_percent": None,
+        "caveat": CAVEAT_TEXT,
+        "answer_text": answer_text,
+        "tool_log": [],
+        "ela_image_path": None,
+        "report_path": None,
+        "report_url": None,
+        "download_url": None,
+        "report_download_url": None,
+        "download_link": None,
+        "report_link": None,
+        "mode": mode,
+        "_state": {"history": history, "image_path": None, "image_hash": None},
+    }
 
 
 def agent_chat(
@@ -167,8 +351,9 @@ def agent_chat(
     *,
     detector: Any | None = None,
     client: Any | None = None,
-) -> tuple[str, list[dict[str, str]], Image.Image | None, dict[str, Any]]:
-    """Answer a chat turn about an uploaded image and return updated state.
+    threshold: float | None = None,
+) -> dict[str, Any]:
+    """Answer a chat turn with grounded fields and updated conversation state.
 
     The durable image remains under ``artifacts/uploads`` for same-image
     follow-ups. A separate per-turn copy is passed to the agent and removed in
@@ -187,27 +372,22 @@ def agent_chat(
                 previous.unlink(missing_ok=True)
         except (OSError, ValueError) as exc:
             safe_error = escape_untrusted(f"{type(exc).__name__}: {exc}")
-            return (
-                f"### Upload error\n\n{safe_error}",
-                [],
-                None,
-                {"history": history, "image_path": None, "image_hash": None},
+            return _empty_reply(
+                f"Upload error: {safe_error}",
+                history,
+                mode="error",
             )
     if image_path is None or not image_path.is_file():
-        return (
-            "Upload an image with your question to begin.",
-            [],
-            None,
-            {"history": history, "image_path": None, "image_hash": None},
-        )
+        return _empty_reply("Upload an image with your question to begin.", history, mode="waiting")
 
     stable_path = image_path
     digest = image_hash(stable_path)
     turn_path = _temporary_copy(stable_path)
     tool_log: list[dict[str, str]] = []
     ela: Image.Image | None = None
+    generated_ela_path: str | None = None
     reused = False
-    fallback_reason = ""
+    mode = "agent"
     try:
         try:
             result: AgentResult = run_agent_full(
@@ -215,73 +395,118 @@ def agent_chat(
                 image_path=str(turn_path),
                 history=history,
                 client=client,
+                threshold=threshold,
             )
             if result.stopped_reason == "model_unavailable":
-                fallback_reason = "No configured model provider was available."
-                raise RuntimeError("model unavailable")
-            reused = result.steps == 0 and not any(
-                item.get("tool_calls") for item in result.messages
-            )
-            tool_log = _agent_tool_log(result.messages)
-            if reused:
-                tool_log = _record_tool_log(result.record)
-            answer_text = escape_untrusted(result.answer)
-            if reused:
-                answer_text = "**Reused saved result.**\n\n" + answer_text
-            ela = _ela_from_record(result.record)
-            if ela is None and ELA_TOOL_NAME not in {
-                entry["tool"] for entry in tool_log
-            }:
-                ela = _ensure_ela(turn_path)
-            saved_history = _clean_history(result.messages)
-            if reused:
-                saved_payload = [
-                    {
-                        "tool": item.tool,
-                        "status": item.status,
-                        "result": item.result,
-                        "note": item.rationale,
-                    }
-                    for item in result.record.observations
-                ]
-                saved_history.append(
-                    {
-                        "role": "assistant",
-                        "content": "Previously saved tool results (data): "
-                        + _json_text(saved_payload),
-                    }
+                mode = "fixed_pipeline"
+                failure_reason = _llm_failure_reason(result.errors or [result.answer])
+                _LOGGER.warning("model chat unavailable: %s; using fixed pipeline", failure_reason)
+                record = run_investigation(
+                    str(turn_path),
+                    goal="custom",
+                    goal_text=message,
+                    config={
+                        "max_tool_calls_per_image": 10,
+                        **({"threshold": float(threshold)} if threshold is not None else {}),
+                    },
+                    planner=False,
+                    detector=detector,
                 )
-            new_state = {
-                "history": saved_history,
-                "image_path": str(stable_path),
-                "image_hash": digest,
-                "filename": filename,
-                "reused_saved_result": reused,
-            }
+                record.filename = filename
+                tool_log = _record_tool_log(record, source="fixed pipeline")
+                ela = _ela_from_record(record)
+                answer_text = (
+                    f"{_fixed_answer(record)} Language model unavailable ({failure_reason}); "
+                    "the fixed pipeline supplied this evidence summary."
+                )
+                marker = "models tried:"
+                if marker in result.answer.casefold():
+                    marker_index = result.answer.casefold().rfind(marker)
+                    tried_models = result.answer[marker_index + len(marker) :].strip().rstrip(".")
+                    answer_text += f" Models tried: {tried_models}."
+                saved_history = history + [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": answer_text},
+                ]
+                new_state = {
+                    "history": saved_history,
+                    "image_path": str(stable_path),
+                    "image_hash": digest,
+                    "filename": filename,
+                    "reused_saved_result": False,
+                }
+                if ela is None:
+                    ela, generated_ela_path = _ensure_ela_with_path(turn_path)
+            else:
+                reused = result.steps == 0 and not any(
+                    item.get("tool_calls") for item in result.messages
+                )
+                tool_log = _agent_tool_log(result.messages)
+                if reused:
+                    tool_log = _record_tool_log(result.record)
+                answer_text = result.answer
+                ela = _ela_from_record(result.record)
+                if ela is None and ELA_TOOL_NAME not in {
+                    entry["tool"] for entry in tool_log
+                }:
+                    ela, generated_ela_path = _ensure_ela_with_path(turn_path)
+                saved_history = _clean_history(result.messages)
+                if reused:
+                    saved_payload = [
+                        {
+                            "tool": item.tool,
+                            "status": item.status,
+                            "result": item.result,
+                            "note": item.rationale,
+                        }
+                        for item in result.record.observations
+                    ]
+                    saved_history.append(
+                        {
+                            "role": "assistant",
+                            "content": "Previously saved tool results (data): "
+                            + _json_text(saved_payload),
+                        }
+                    )
+                record = result.record
+                record.filename = filename
+                new_state = {
+                    "history": saved_history,
+                    "image_path": str(stable_path),
+                    "image_hash": digest,
+                    "filename": filename,
+                    "reused_saved_result": reused,
+                }
         except Exception as exc:  # unavailable providers and unexpected client errors
+            mode = "fixed_pipeline"
+            failure_reason = _llm_failure_reason([f"{type(exc).__name__}: {exc}"])
+            _LOGGER.warning(
+                "model chat exception: %s (%s); using fixed pipeline",
+                type(exc).__name__,
+                failure_reason,
+            )
             record = run_investigation(
                 str(turn_path),
                 goal="custom",
                 goal_text=message,
-                config={"max_tool_calls_per_image": 10},
+                config={
+                    "max_tool_calls_per_image": 10,
+                    **({"threshold": float(threshold)} if threshold is not None else {}),
+                },
                 planner=False,
                 detector=detector,
             )
             record.filename = filename
-            tool_log = _record_tool_log(record, source="fixed pipeline (no LLM)")
+            tool_log = _record_tool_log(record, source="fixed pipeline")
             ela = _ela_from_record(record)
             if ela is None:
-                ela = _ensure_ela(turn_path)
+                ela, generated_ela_path = _ensure_ela_with_path(turn_path)
             answer_text = (
-                "**fixed pipeline (no LLM)**\n\n"
-                + render_record(record)
-                + "\n\n"
-                + escape_untrusted(
-                    fallback_reason or f"Agent request failed ({type(exc).__name__})."
-                )
+                f"{_fixed_answer(record)} Language model unavailable ({failure_reason}); "
+                "the fixed pipeline supplied this evidence summary."
             )
             updated_history = history + [
-                {"role": "user", "content": escape_untrusted(message)},
+                {"role": "user", "content": message},
                 {"role": "assistant", "content": answer_text},
             ]
             new_state = {
@@ -294,6 +519,6 @@ def agent_chat(
     finally:
         turn_path.unlink(missing_ok=True)
 
-    safe_filename = escape_untrusted(filename)
-    rendered_answer = f"### {safe_filename}\n\n{answer_text}"
-    return rendered_answer, tool_log, ela, new_state
+    return _structured_reply(
+        record, answer_text, tool_log, mode, new_state, generated_ela_path
+    )

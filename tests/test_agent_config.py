@@ -97,9 +97,34 @@ def test_config_loads_with_every_required_field():
 def test_primary_is_the_phase_one_selection():
     config = get_agent_config()
 
-    assert config["provider"] == "openrouter"
-    assert config["model"] == "nvidia/nemotron-3.5-lightning:free"
-    assert config["api_key_env"] == "OPENROUTER_API_KEY"
+    assert config["provider"] == "gemini"
+    assert config["model"] == "gemini-2.5-flash"
+    assert config["api_key_env"] == "GEMINI_API_KEY"
+
+
+@pytest.mark.parametrize(
+    ("provider", "key_name", "base_url"),
+    [
+        ("anthropic", "ANTHROPIC_API_KEY", "https://api.anthropic.com/v1"),
+        ("openai", "OPENAI_API_KEY", "https://api.openai.com/v1"),
+    ],
+)
+def test_env_provider_settings_override_primary_without_fallbacks(
+    monkeypatch, provider, key_name, base_url
+):
+    monkeypatch.setenv("LLM_PROVIDER", provider)
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "17")
+
+    config = get_agent_config()
+    endpoints = model_entries(config)
+
+    assert config["provider"] == provider
+    assert config["api_key_env"] == key_name
+    assert config["base_url"] == base_url
+    assert config["request_timeout_seconds"] == 17
+    assert config["fallback_models"] == []
+    assert len(endpoints) == 1
 
 
 def test_model_entries_are_primary_first_then_fallbacks():

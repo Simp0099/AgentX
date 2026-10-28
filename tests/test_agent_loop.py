@@ -19,13 +19,14 @@ sys.path.insert(0, str(ROOT))
 
 from agent import loop  # noqa: E402
 from agent.agent_config import get_agent_config, model_entries  # noqa: E402
-from agent.schemas import Verdict  # noqa: E402
+from agent.schemas import InvestigationRecord, Verdict  # noqa: E402
 from tests.fakes import FakeClient, make_message, make_tool_call, tool_messages  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _zero_backoff(monkeypatch, tmp_path):
     monkeypatch.setattr(loop, "BACKOFF_SECONDS", (0.0, 0.0))
+    loop._MODEL_COOLDOWNS.clear()
     config = get_agent_config().copy()
     config["memory"] = {"enabled": True, "path": str(tmp_path / "memory.sqlite")}
     monkeypatch.setattr(loop, "get_agent_config", lambda: config)
@@ -50,6 +51,71 @@ def _inspect_call(path, call_id="call_1"):
     return make_tool_call("inspect_image", {"image_path": str(path)}, call_id=call_id)
 
 
+def test_anthropic_adapter_translates_messages_and_tool_calls(monkeypatch):
+    response_body = json.dumps(
+        {
+            "content": [
+                {"type": "text", "text": "I will inspect this image."},
+                {
+                    "type": "tool_use",
+                    "id": "call_1",
+                    "name": "inspect_image",
+                    "input": {"image_path": "/uploads/photo.png"},
+                },
+            ],
+            "stop_reason": "tool_use",
+        }
+    ).encode()
+
+    class FakeHTTPResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return response_body
+
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data)
+        return FakeHTTPResponse()
+
+    monkeypatch.setattr(loop.urllib.request, "urlopen", fake_urlopen)
+    client = loop._AnthropicCompatClient("test-key", "https://api.anthropic.com/v1", 12)
+
+    result = client.chat.completions.create(
+        model="test-model",
+        messages=[
+            {"role": "system", "content": "Use the tools safely."},
+            {"role": "user", "content": "Inspect the image."},
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "inspect_image",
+                    "description": "Inspect image properties.",
+                    "parameters": {"type": "object", "properties": {"image_path": {"type": "string"}}},
+                },
+            }
+        ],
+    )
+
+    assert captured["timeout"] == 12
+    assert captured["payload"]["system"] == "Use the tools safely."
+    assert captured["payload"]["tools"][0]["name"] == "inspect_image"
+    assert result.choices[0].message.content == "I will inspect this image."
+    call = result.choices[0].message.tool_calls[0]
+    assert call.id == "call_1"
+    assert call.function.name == "inspect_image"
+    assert json.loads(call.function.arguments) == {"image_path": "/uploads/photo.png"}
+
+
 # ---------------------------------------------------------------------------
 # (a) direct final answer
 # ---------------------------------------------------------------------------
@@ -61,7 +127,8 @@ def test_direct_final_answer_returns_text_and_messages(image):
     answer, messages = loop.run_agent("quick_check", str(image), client=client)
 
     assert answer.startswith("Verdict: nothing to flag.")
-    assert "Confidence: medium." in answer
+    assert "Confidence:" not in answer
+    assert "Limits you must state rather than hide" in answer
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
     user_turn = next(item for item in reversed(messages) if item["role"] == "user")
@@ -70,6 +137,34 @@ def test_direct_final_answer_returns_text_and_messages(image):
     assert messages[-1]["role"] == "assistant"
     assert messages[-1]["content"] == answer
     assert len(client.requests) == 1
+
+
+def test_summary_postprocessing_removes_proof_confidence_and_probability_language():
+    record = InvestigationRecord(
+        investigation_id="id",
+        image_id="hash",
+        filename="image.png",
+        goal="quick_check",
+        goal_text="",
+        threshold=0.5,
+        config_snapshot_hash="config",
+        model_version="model",
+        observations=[],
+        errors=[],
+        rationale="",
+    )
+    answer, _ = loop._assess_answer(
+        "The image proves tampering. It shows strong evidence of splicing.\n"
+        "Confidence: high. The score is a probability of tampering.",
+        record,
+        Verdict.FLAGGED_FOR_REVIEW,
+    )
+    assert "proves tampering" not in answer
+    assert "strong evidence of splicing" not in answer
+    assert "Confidence: high" not in answer
+    assert "probability of tampering" not in answer
+    assert "review signal, not proof" in answer
+    assert "Limits you must state rather than hide" in answer
 
 
 # ---------------------------------------------------------------------------
@@ -233,17 +328,18 @@ def test_provider_errors_retries_then_falls_back_to_the_next_model(image):
     endpoints = model_entries(get_agent_config())
     primary = endpoints[0]["model"]
     fallback = endpoints[1]["model"]
-    failures = _provider_errors(loop.MAX_PROVIDER_RETRIES + 1)  # initial attempt + 2 retries
-    client = FakeClient([*failures, make_message(content="ok from the fallback")])
+    client = FakeClient([
+        RuntimeError("429 too many requests"),
+        make_message(content="ok from the fallback"),
+    ])
 
     answer, _messages = loop.run_agent("quick_check", str(image), client=client)
 
     assert answer.startswith("ok from the fallback")
     models = [request["model"] for request in client.requests]
-    # Three failed attempts against the primary (attempt + two retries), then
-    # the switch to the fallback model succeeds.
-    assert models == [primary, primary, primary, fallback]
-    assert len(models) == (loop.MAX_PROVIDER_RETRIES + 2)
+    # Quota moves directly to the first fallback without retrying the primary.
+    assert models == [primary, fallback]
+    assert len(models) == 2
 
 
 def test_every_endpoint_failing_returns_a_structured_failure(image):

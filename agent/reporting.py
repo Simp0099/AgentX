@@ -16,6 +16,7 @@ from reportlab.lib.units import cm
 from reportlab.platypus import (
     Image as ReportImage,
 )
+from reportlab.graphics.shapes import Drawing, Rect, String
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -36,7 +37,8 @@ S = {
         parent=_base["Title"],
         fontSize=20,
         leading=25,
-        textColor=colors.HexColor("#1a4d7a"),
+        fontName="Times-Bold",
+        textColor=colors.HexColor("#1F1D1A"),
         spaceAfter=8,
     ),
     "subtitle": ParagraphStyle(
@@ -52,7 +54,8 @@ S = {
         parent=_base["Heading1"],
         fontSize=14,
         leading=18,
-        textColor=colors.HexColor("#1a4d7a"),
+        fontName="Times-Bold",
+        textColor=colors.HexColor("#1F1D1A"),
         spaceBefore=8,
         spaceAfter=6,
     ),
@@ -140,23 +143,58 @@ def _trusted_asset_path(record: InvestigationRecord, candidate: object) -> Path 
     return None
 
 
-def _asset_flowable(path: Path | None, caption: str, max_width=8.5 * cm, max_height=6.5 * cm):
+THUMBNAIL_WIDTH = 200
+
+
+def _thumbnail_placeholder(file_type: str, width: int = THUMBNAIL_WIDTH, height: int = 150):
+    """Return a fixed-size placeholder box showing the file type."""
+    drawing = Drawing(width, height)
+    rect = Rect(0, 0, width, height, fillColor=colors.HexColor("#eef3f7"), strokeColor=colors.HexColor("#9aa7b1"))
+    drawing.add(rect)
+    label = (file_type or "file").upper().lstrip(".")
+    drawing.add(
+        String(
+            width / 2,
+            height / 2 - 4,
+            label,
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            fillColor=colors.HexColor("#555555"),
+            textAnchor="middle",
+        )
+    )
+    return drawing
+
+
+def _asset_flowable(path: Path | None, caption: str, max_width=THUMBNAIL_WIDTH, max_height=6.5 * cm):
     if path is None:
-        return [Paragraph(_escape_text(f"{caption}: unavailable"), S["small"])]
+        return [
+            Paragraph(_escape_text(caption), S["small"]),
+            _thumbnail_placeholder(Path(caption).suffix if False else "file"),
+            Spacer(1, 5),
+        ]
     try:
+        file_type = Path(path).suffix or "file"
         with PILImage.open(path) as opened:
             image = opened.convert("RGB")
-            image.thumbnail((1200, 900))
+            image.thumbnail((THUMBNAIL_WIDTH, THUMBNAIL_WIDTH * 4))
             buffer = BytesIO()
             image.save(buffer, format="PNG")
             buffer.seek(0)
             flowable = ReportImage(buffer)
-            scale = min(max_width / flowable.imageWidth, max_height / flowable.imageHeight, 1.0)
+            scale = min(THUMBNAIL_WIDTH / flowable.imageWidth, 1.0)
             flowable.drawWidth = flowable.imageWidth * scale
             flowable.drawHeight = flowable.imageHeight * scale
+            if flowable.drawWidth > THUMBNAIL_WIDTH:
+                flowable.drawWidth = THUMBNAIL_WIDTH
         return [Paragraph(_escape_text(caption), S["small"]), flowable, Spacer(1, 5)]
     except (OSError, ValueError):
-        return [Paragraph(_escape_text(f"{caption}: unavailable"), S["small"])]
+        file_type = Path(path).suffix if path else "file"
+        return [
+            Paragraph(_escape_text(caption), S["small"]),
+            _thumbnail_placeholder(file_type),
+            Spacer(1, 5),
+        ]
 
 
 def _source_image_path(record: InvestigationRecord) -> Path | None:
@@ -333,6 +371,24 @@ def _build_story(record: InvestigationRecord) -> list:
     return story
 
 
+
+
+def _count_pages(story, pagesize=A4, margins=(2 * cm, 2 * cm, 1.8 * cm, 1.8 * cm)):
+    """Render story once to count total pages."""
+    left, right, top, bottom = margins
+    buffer = BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=pagesize,
+        leftMargin=left,
+        rightMargin=right,
+        topMargin=top,
+        bottomMargin=bottom,
+    )
+    document.build(story)
+    return document.page
+
+
 def _page_number(canvas, document):
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
@@ -345,6 +401,14 @@ def generate_pdf(record: InvestigationRecord, output_path: Path):
     """Generate a PDF using only the structured record and configured text."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    story = _build_story(record)
+    total = _count_pages(list(story))
+    def footer(canvas, document):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#777777"))
+        canvas.drawRightString(A4[0] - 2 * cm, 1.1 * cm, f"Page {document.page} of {total}")
+        canvas.restoreState()
     document = SimpleDocTemplate(
         str(path),
         pagesize=A4,
@@ -355,20 +419,39 @@ def generate_pdf(record: InvestigationRecord, output_path: Path):
         title="Deepfake Forensic Investigation",
         author="Local Forensic Pipeline",
     )
-    document.build(_build_story(record), onFirstPage=_page_number, onLaterPages=_page_number)
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
     return path
 
 
 def generate_batch_pdf(records: list[InvestigationRecord], output_path: Path):
-    """Generate a batch summary table plus a compact per-record outcome list."""
+    """Generate a batch summary table with a thumbnail column plus per-file details."""
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = [["Filename", "Status", "Raw score", "Verdict category"]]
+    data = [["Thumbnail", "Filename", "Status", "Raw score", "Verdict category"]]
     for record in records:
         localizer = _result(record, "run_localizer")
         status = "completed" if record.verdict else "incomplete"
+        thumbnail_path = _source_image_path(record)
+        if thumbnail_path is None:
+            thumb_flowable = _thumbnail_placeholder(Path(record.filename).suffix or "file")
+        else:
+            try:
+                with PILImage.open(thumbnail_path) as opened:
+                    image = opened.convert("RGB")
+                    image.thumbnail((140, 140))
+                    buffer = BytesIO()
+                    image.save(buffer, format="PNG")
+                    buffer.seek(0)
+                    flowable = ReportImage(buffer)
+                    scale = min(140 / flowable.imageWidth, 140 / flowable.imageHeight, 1.0)
+                    flowable.drawWidth = flowable.imageWidth * scale
+                    flowable.drawHeight = flowable.imageHeight * scale
+                    thumb_flowable = flowable
+            except (OSError, ValueError):
+                thumb_flowable = _thumbnail_placeholder(Path(record.filename).suffix or "file")
         data.append(
             [
+                thumb_flowable,
                 Paragraph(_escape_text(record.filename), S["cell"]),
                 Paragraph(_escape_text(status), S["cell"]),
                 Paragraph(_escape_text(localizer.get("tampered_prob", "not reported")), S["cell"]),
@@ -378,7 +461,7 @@ def generate_batch_pdf(records: list[InvestigationRecord], output_path: Path):
                 ),
             ]
         )
-    table = Table(data, repeatRows=1, colWidths=[6 * cm, 3 * cm, 3 * cm, 5 * cm])
+    table = Table(data, repeatRows=1, colWidths=[3.2 * cm, 4.5 * cm, 2.5 * cm, 2.5 * cm, 4 * cm])
     table.setStyle(
         TableStyle(
             [
@@ -392,12 +475,17 @@ def generate_batch_pdf(records: list[InvestigationRecord], output_path: Path):
             ]
         )
     )
-    document = SimpleDocTemplate(str(path), pagesize=A4, title="Batch Forensic Summary")
-    document.build(
-        [Paragraph("Batch summary", S["title"]), Spacer(1, 8), table],
-        onFirstPage=_page_number,
-        onLaterPages=_page_number,
+    story = [Paragraph("Batch summary", S["title"]), Spacer(1, 8), table]
+    total = _count_pages(list(story))
+    footer = lambda canvas, document: (
+        canvas.saveState(),
+        canvas.setFont("Helvetica", 8),
+        canvas.setFillColor(colors.HexColor("#777777")),
+        canvas.drawRightString(A4[0] - 2 * cm, 1.1 * cm, f"Page {document.page} of {total}"),
+        canvas.restoreState(),
     )
+    document = SimpleDocTemplate(str(path), pagesize=A4, title="Batch Forensic Summary")
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
     return path
 
 

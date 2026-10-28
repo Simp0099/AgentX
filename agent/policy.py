@@ -59,8 +59,10 @@ def next_checks(record: InvestigationRecord) -> list[list[ToolCall]]:
     coverage_problem = any("coverage" in str(issue).lower() for issue in issues)
     conflict = (flagged and box_problem) or coverage_problem
 
-    need_ela = uncertain or flagged or conflict
-    need_metadata = uncertain or metadata_goal or conflict
+    need_ela = (uncertain or flagged or conflict) and config.get("run_ela", True)
+    need_metadata = (uncertain or metadata_goal or conflict) and config.get(
+        "run_metadata_inspection", True
+    )
     if need_ela and "generate_ela" not in done:
         return [[ToolCall("generate_ela", {"path": path})]]
     if need_metadata and "inspect_metadata" not in done:
@@ -126,4 +128,3 @@ class StopPolicy:
 def should_stop(record: InvestigationRecord, max_steps: int | None = None) -> tuple[bool, str]:
     """Module-level convenience wrapper used by the orchestrator."""
     return StopPolicy().should_stop(record, max_steps=max_steps)
-

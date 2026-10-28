@@ -13,12 +13,11 @@ checkpoints/*
 *.ckpt
 *.safetensors
 logs/
+artifacts/
+checkpoints/
 reports/
 !reports/
 !reports/agent_eval.json
-# Generated per-investigation evidence (ELA maps, uploads). Test runs write here.
-artifacts/
-
 # Python
 __pycache__/
 *.py[cod]

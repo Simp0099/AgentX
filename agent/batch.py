@@ -77,6 +77,21 @@ def _tool_error(name: str, error: str) -> dict:
     return {"filename": name, "status": BatchStatus.FAILED, "error": error}
 
 
+def _is_junk_member(filename: str) -> bool:
+    path = PurePosixPath(filename.replace("\\", "/"))
+    return (
+        "__MACOSX" in path.parts
+        or path.name.startswith(".")
+        or path.name.casefold()
+        in {
+            "thumbs.db",
+            "desktop.ini",
+        }
+        if not _member_name_is_unsafe(filename)
+        else False
+    )
+
+
 def _analyze_extracted(path: Path, original_name: str, detector, image_index: int) -> dict:
     from agent.orchestrator import run_investigation
 
@@ -120,7 +135,17 @@ def _analyze_extracted(path: Path, original_name: str, detector, image_index: in
 
 
 def _prepare_members(archive: zipfile.ZipFile, config: dict) -> tuple[list, str | None]:
-    members = [member for member in archive.infolist() if not member.is_dir()]
+    members = [
+        member
+        for member in archive.infolist()
+        if not member.is_dir() and not _is_junk_member(member.filename)
+    ]
+    if any(
+        _member_name_is_unsafe(member.filename)
+        for member in archive.infolist()
+        if not member.is_dir()
+    ):
+        return [], "ZIP-slip detected: unsafe member path"
     if len(members) > int(config.get("max_zip_members", 100)):
         return [], "ZIP contains too many files"
     if any(_member_name_is_unsafe(member.filename) for member in members):
@@ -136,26 +161,9 @@ def _prepare_members(archive: zipfile.ZipFile, config: dict) -> tuple[list, str 
         float(config.get("max_zip_compression_ratio", 100)),
     ):
         return [], "ZIP bomb detected: compression ratio exceeds configured limit"
-    supported = set(
-        config.get(
-            "supported_image_extensions",
-            [
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".tif",
-                ".tiff",
-                ".bmp",
-                ".webp",
-            ],
-        )
-    )
     for member in members:
-        suffix = Path(member.filename).suffix.lower()
-        if suffix == ".zip":
+        if Path(member.filename).suffix.lower() == ".zip":
             return [], "Nested ZIP archives are not accepted"
-        if suffix not in supported:
-            return [], "Non-image ZIP member rejected"
     return members, None
 
 
@@ -173,6 +181,7 @@ def process_batch(
         "uncompressed": int(config.get("max_zip_uncompressed_bytes", 100_000_000)),
         "members": int(config.get("max_zip_members", 100)),
         "pixels": int(config.get("max_image_pixels", 40_000_000)),
+        "file_bytes": int(config.get("max_file_bytes", 50_000_000)),
         "seconds": float(config.get("max_batch_processing_seconds", 120)),
         "workers": max(1, int(config.get("batch_workers", 2))),
     }
@@ -197,6 +206,28 @@ def process_batch(
                 return {"status": BatchStatus.FAILED, "results": [], "error": validation_error}
             if not members:
                 return {"status": BatchStatus.COMPLETED, "results": [], "error": None}
+
+            supported = set(
+                config.get(
+                    "supported_image_extensions",
+                    [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"],
+                )
+            )
+            images = []
+            for member in members:
+                if Path(member.filename).suffix.lower() in supported:
+                    images.append(member)
+                else:
+                    results.append(
+                        {
+                            "filename": member.filename,
+                            "status": "Skipped",
+                            "reason": "not an image",
+                        }
+                    )
+            members = images
+            if not members:
+                return {"status": BatchStatus.COMPLETED, "results": results, "error": None}
 
             with tempfile.TemporaryDirectory(prefix="job_", dir=destination) as temp_name:
                 job_dir = Path(temp_name)
@@ -226,6 +257,8 @@ def process_batch(
                                     first_bytes = chunk[:4]
                                 actual_size += len(chunk)
                                 total_streamed += len(chunk)
+                                if actual_size > limits["file_bytes"]:
+                                    raise ValueError("image exceeds configured file-size limit")
                                 if total_streamed > limits["uncompressed"]:
                                     return {
                                         "status": BatchStatus.FAILED,
@@ -373,6 +406,24 @@ def process_mixed_batch(zip_path: str, work_dir: str, cancel_flag: dict | None =
             members, error = _prepare_members(archive, config)
             if error:
                 return {"status": BatchStatus.FAILED, "results": [], "error": error}
+            supported = set(
+                config.get(
+                    "supported_image_extensions",
+                    [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"],
+                )
+            )
+            for member in members:
+                if Path(member.filename).suffix.lower() not in supported:
+                    results.append(
+                        {
+                            "filename": member.filename,
+                            "status": "Skipped",
+                            "reason": "not an image",
+                        }
+                    )
+            members = [
+                member for member in members if Path(member.filename).suffix.lower() in supported
+            ]
             with tempfile.TemporaryDirectory(prefix="mixed_job_", dir=destination) as temp_name:
                 job_dir = Path(temp_name)
                 total = 0

@@ -64,6 +64,11 @@ def _setup(tmp_path, monkeypatch):
         "_ensure_ela",
         lambda _path: Image.new("RGB", (16, 16), "gray"),
     )
+    monkeypatch.setattr(
+        chat_handler,
+        "_ensure_ela_with_path",
+        lambda _path: (Image.new("RGB", (16, 16), "gray"), None),
+    )
     return uploads
 
 
@@ -101,25 +106,76 @@ def test_handler_uses_fake_client_and_returns_tool_log_and_ela(tmp_path, monkeyp
     image = Image.fromarray(np.full((16, 16, 3), 120, dtype=np.uint8))
     image.filename = "sample.png"
 
-    answer, calls, ela, state = chat_handler.agent_chat("Is this edited?", image, {})
+    result = chat_handler.agent_chat("Is this edited?", image, {})
+    state = result["_state"]
 
-    assert "The inspection found an image." in answer
+    assert result["answer_text"].startswith("The inspection found an image.")
+    assert result["mode"] == "agent"
+    assert result["image"] == {"filename": "sample.png", "width": 16, "height": 16}
+    calls = result["tool_log"]
     assert calls[0]["tool"] == "inspect_image"
     assert calls[0]["status"] == "ok"
     assert '"valid": true' in calls[0]["result_preview"]
-    assert ela is not None and ela.size == image.size
+    assert result["ela_image_path"] is None
     assert state["image_hash"] and Path(state["image_path"]).is_file()
     assert len(clients) == 1
     assert len(list(uploads.glob("chat-turn-*.png"))) == 0
+
+
+def test_manipulated_image_returns_pixel_region_and_coverage(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    record = _record("image.png")
+    monkeypatch.setattr(
+        chat_handler,
+        "run_agent_full",
+        lambda **_kwargs: AgentResult(
+            answer="The evidence flags a manipulated region.",
+            messages=[{"role": "assistant", "content": "The evidence flags a manipulated region."}],
+            record=record,
+            steps=1,
+            stopped_reason="final_answer",
+        ),
+    )
+
+    reply = chat_handler.agent_chat("Check", Image.new("RGB", (16, 16)), {})
+
+    assert reply["region"] == {"horizontal": [2, 13], "vertical": [2, 13]}
+    assert reply["coverage_percent"] == 47.3
+    assert reply["tampered_score_uncalibrated"] == 0.8
+
+
+def test_authentic_image_has_no_region(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    record = _record("image.png")
+    record.verdict = Verdict.NOT_FLAGGED_BY_THIS_DETECTOR
+    record.observations[1].result = {"tampered_prob": 0.1, "bbox": None}
+    monkeypatch.setattr(
+        chat_handler,
+        "run_agent_full",
+        lambda **_kwargs: AgentResult(
+            answer="No region was flagged.",
+            messages=[{"role": "assistant", "content": "No region was flagged."}],
+            record=record,
+            steps=1,
+            stopped_reason="final_answer",
+        ),
+    )
+
+    reply = chat_handler.agent_chat("Check", Image.new("RGB", (16, 16)), {})
+
+    assert reply["region"] is None
+    assert reply["coverage_percent"] is None
 
 
 def test_followup_reuses_history_and_needs_no_new_image(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     original_run = loop.run_agent_full
     seen_histories = []
+    seen_paths = []
 
     def run_with_fake(goal, image_path, history=None, **kwargs):
         seen_histories.append(list(history or []))
+        seen_paths.append(str(image_path))
         if not history:
             responses = [
                 make_message(
@@ -142,21 +198,24 @@ def test_followup_reuses_history_and_needs_no_new_image(tmp_path, monkeypatch):
 
     monkeypatch.setattr(chat_handler, "run_agent_full", run_with_fake)
     image = Image.new("RGB", (16, 16), "blue")
-    _, _calls, _ela, state = chat_handler.agent_chat("Check this image", image, {})
-    followup, calls, _ela, next_state = chat_handler.agent_chat(
-        "What did you find?", None, state
-    )
+    first = chat_handler.agent_chat("Check this image", image, {})
+    state = first["_state"]
+    followup = chat_handler.agent_chat("What did you find?", None, state)
+    next_state = followup["_state"]
 
-    assert "The earlier inspection" in followup
+    assert "The earlier inspection" in followup["answer_text"]
+    calls = followup["tool_log"]
     assert seen_histories[0] == []
     assert any(item["role"] == "tool" for item in seen_histories[1])
     assert len(calls) == 1
     assert calls[0]["tool"] == "inspect_image"
+    assert len(seen_paths) == 2
+    assert Path(state["image_path"]).is_file()
     assert next_state["image_path"] == state["image_path"]
     assert next_state["image_hash"] == state["image_hash"]
 
 
-def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
+def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch, caplog):
     uploads = _setup(tmp_path, monkeypatch)
     monkeypatch.setattr(
         chat_handler,
@@ -167,6 +226,7 @@ def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
             record=_record("temporary.png"),
             steps=0,
             stopped_reason="model_unavailable",
+            errors=["RuntimeError: environment variable OPENAI_API_KEY is not set"],
         ),
     )
     monkeypatch.setattr(
@@ -177,14 +237,18 @@ def test_no_model_uses_clearly_labeled_fixed_pipeline(tmp_path, monkeypatch):
 
     image = Image.new("RGB", (16, 16), "green")
     image.filename = "<photo>.png"
-    answer, calls, _ela, state = chat_handler.agent_chat("Is this edited?", image, {})
+    result = chat_handler.agent_chat("Is this edited?", image, {})
+    state = result["_state"]
 
-    assert "fixed pipeline (no LLM)" in answer
-    assert "Flagged for review" in answer
-    assert "No configured model provider was available." in answer
+    assert result["mode"] == "fixed_pipeline"
+    assert "Flagged for review" in result["answer_text"]
+    assert "(no LLM)" not in result["answer_text"]
+    assert "fixed pipeline (no LLM)" not in result["answer_text"]
+    assert "Language model unavailable (missing provider API key)" in result["answer_text"]
+    assert "model chat unavailable: missing provider API key" in caplog.text
+    calls = result["tool_log"]
     assert calls[0]["tool"] == "inspect_image"
-    assert calls[0]["source"] == "fixed pipeline (no LLM)"
-    assert "### &lt;photo&gt;.png" in answer
+    assert calls[0]["source"] == "fixed pipeline"
     assert Path(state["image_path"]).parent == uploads.resolve()
 
 
@@ -207,11 +271,12 @@ def test_memory_hit_is_marked_as_reused_saved_result(tmp_path, monkeypatch):
         ),
     )
 
-    answer, calls, _ela, _state = chat_handler.agent_chat(
+    result = chat_handler.agent_chat(
         "Is this edited?", Image.new("RGB", (16, 16), "gold"), {}
     )
 
-    assert "Reused saved result" in answer
+    assert result["answer_text"] == "The saved inspection found a review signal."
+    calls = result["tool_log"]
     assert calls[0]["tool"] == "inspect_image"
 
 
@@ -252,17 +317,19 @@ def test_untrusted_model_and_tool_text_is_escaped(tmp_path, monkeypatch):
         )()
 
     monkeypatch.setattr(chat_handler, "run_agent_full", fake_run)
-    answer, calls, _ela, _state = chat_handler.agent_chat(
+    result = chat_handler.agent_chat(
         "Explain", Image.new("RGB", (16, 16), "red"), {}
     )
 
-    assert "&lt;script&gt;" in answer
+    assert result["answer_text"] == "<script>alert(1)</script>"
+    calls = result["tool_log"]
     assert "&lt;unsafe&gt;" in calls[0]["arguments"]
     assert "&lt;script&gt;" in calls[0]["result_preview"]
 
 
 def test_chat_handler_can_create_ela_with_the_registered_tool(tmp_path, monkeypatch):
     make_ela = chat_handler._ensure_ela
+    make_ela_with_path = chat_handler._ensure_ela_with_path
     uploads = _setup(tmp_path, monkeypatch)
     from agent.tools import generate_ela
 
@@ -278,6 +345,7 @@ def test_chat_handler_can_create_ela_with_the_registered_tool(tmp_path, monkeypa
     Image.new("RGB", (20, 18), "purple").save(path)
 
     monkeypatch.setattr(chat_handler, "_ensure_ela", make_ela)
+    monkeypatch.setattr(chat_handler, "_ensure_ela_with_path", make_ela_with_path)
     ela = chat_handler._ensure_ela(path)
 
     assert ela is not None

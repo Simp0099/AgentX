@@ -20,6 +20,7 @@ def _config(monkeypatch, tmp_path, *, reflection=False):
     monkeypatch.setattr(loop, "get_agent_config", lambda: config)
     monkeypatch.setenv(loop.ENV_UPLOAD_ROOT, str(tmp_path))
     monkeypatch.setattr(loop, "BACKOFF_SECONDS", (0.0, 0.0))
+    loop._MODEL_COOLDOWNS.clear()
 
 
 def _image(tmp_path):
@@ -150,7 +151,8 @@ def test_borderline_score_adds_review_line_and_low_confidence(tmp_path, monkeypa
     assert result.confidence == "low"
     assert "Needs human review:" in result.answer
     assert "uncertain range" in result.answer
-    assert "Confidence: low." in result.answer
+    assert "Confidence:" not in result.answer
+    assert "Limits you must state rather than hide" in result.answer
 
 
 def test_reflection_disabled_makes_one_model_call(tmp_path, monkeypatch):
@@ -183,3 +185,143 @@ def test_reflection_does_not_replace_answer_without_corrected_marker():
     client = FakeClient([make_message(content="A revised answer without the marker.")])
 
     assert loop.reflect(original, [], client, "test-model") == original
+
+
+def test_quota_skips_primary_without_retry_and_uses_first_fallback(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    client = FakeClient([
+        RuntimeError("429 insufficient quota"),
+        make_message(content="fallback response"),
+    ])
+
+    result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
+
+    assert result.answer.startswith("fallback response")
+    assert [request["model"] for request in client.requests] == [
+        endpoints[0]["model"], endpoints[1]["model"]
+    ]
+
+
+def test_transient_retries_twice_then_falls_back(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    client = FakeClient([
+        TimeoutError("request timed out"),
+        ConnectionError("connection reset"),
+        RuntimeError("503 service unavailable"),
+        make_message(content="fallback response"),
+    ])
+
+    result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
+
+    assert result.answer.startswith("fallback response")
+    assert [request["model"] for request in client.requests] == [
+        endpoints[0]["model"], endpoints[0]["model"], endpoints[0]["model"],
+        endpoints[1]["model"],
+    ]
+
+
+def test_fatal_error_falls_back_to_next_provider(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    client = FakeClient([RuntimeError("400 invalid request: malformed tool schema")])
+
+    result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
+
+    assert result.stopped_reason == "model_unavailable"
+    assert len(client.requests) == len(endpoints)
+    assert endpoints[0]["model"] in result.errors[0]
+
+
+def test_cooled_down_model_is_skipped_on_next_turn(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    path = str(_image(tmp_path))
+    first_client = FakeClient([
+        RuntimeError("429 quota exceeded"),
+        make_message(content="fallback response"),
+    ])
+    loop.run_agent_full("quick_check", path, client=first_client, use_memory=False)
+
+    next_client = FakeClient([make_message(content="next fallback response")])
+    next_result = loop.run_agent_full("quick_check", path, client=next_client, use_memory=False)
+
+    assert next_result.answer.startswith("next fallback response")
+    assert [request["model"] for request in next_client.requests] == [endpoints[1]["model"]]
+
+
+def test_all_models_exhausted_returns_model_unavailable(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    client = FakeClient([RuntimeError("429 quota exhausted") for _ in endpoints])
+
+    result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
+
+    assert result.stopped_reason == "model_unavailable"
+    assert result.answer.startswith("Model unavailable:")
+    assert all(item["model"] in result.answer for item in endpoints)
+    assert len(client.requests) == len(endpoints)
+
+
+def test_unconfigured_provider_keys_are_skipped_before_routing(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    monkeypatch.setattr(loop, "load_env", lambda: None)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-test-key")
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
+
+    created = []
+
+    def build(endpoint):
+        created.append(endpoint)
+        if endpoint["api_key_env"] != "OPENROUTER_API_KEY":
+            return None
+        return FakeClient([make_message(content="OpenRouter free fallback response")])
+
+    monkeypatch.setattr(loop, "_build_client", build)
+    result = loop.run_agent_full(
+        "quick_check", str(_image(tmp_path)), client=None, use_memory=False
+    )
+
+    assert result.answer.startswith("OpenRouter free fallback response")
+    assert created[-1]["model"] == endpoints[1]["model"]
+    assert created[-1]["api_key_env"] == "OPENROUTER_API_KEY"
+
+
+def test_no_configured_free_model_key_returns_clear_unavailable(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    endpoints = loop.model_entries(loop.get_agent_config())
+    monkeypatch.setattr(loop, "load_env", lambda: None)
+    for name in {entry["api_key_env"] for entry in endpoints}:
+        monkeypatch.delenv(name, raising=False)
+
+    result = loop.run_agent_full(
+        "quick_check", str(_image(tmp_path)), client=None, use_memory=False
+    )
+
+    assert result.stopped_reason == "model_unavailable"
+    assert result.answer.startswith("Model unavailable: no configured free-model credentials")
+    assert all(entry["model"] in result.answer for entry in endpoints)
+
+
+def test_retry_after_is_capped_by_configured_maximum(tmp_path, monkeypatch):
+    _config(monkeypatch, tmp_path)
+    config = loop.get_agent_config()
+    config["retry_after_max_seconds"] = 3
+    sleeps = []
+    monkeypatch.setattr(loop.time, "sleep", sleeps.append)
+
+    class ProviderError(RuntimeError):
+        status_code = 503
+        headers = {"Retry-After": "90"}
+
+    client = FakeClient([
+        ProviderError("temporary service error"),
+        make_message(content="retry succeeded"),
+    ])
+    result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
+
+    assert result.answer.startswith("retry succeeded")
+    assert sleeps == [3]

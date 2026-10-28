@@ -1,0 +1,115 @@
+- generic [ref=f1e2]:
+  - banner [ref=f1e3]:
+    - generic "Deepfake Localizer" [ref=f1e4]
+    - navigation "Workspace views" [ref=f1e10]:
+      - button "Overview" [ref=f1e11] [cursor=pointer]
+      - button "Batch analysis" [ref=f1e14] [cursor=pointer]
+      - button "Reports" [ref=f1e18] [cursor=pointer]
+    - generic [ref=f1e22]:
+      - button "Toggle theme" [ref=f1e23] [cursor=pointer]
+      - button "Open analysis settings" [ref=f1e27] [cursor=pointer]
+      - button "Profile" [ref=f1e31] [cursor=pointer]
+  - main [ref=f1e36]:
+    - generic [ref=f1e37]:
+      - generic [ref=f1e38]:
+        - heading "Media authenticity analysis" [level=1] [ref=f1e39]
+        - paragraph [ref=f1e40]: Detect suspicious edits and inspect likely tampered regions.
+      - region [ref=f1e41]:
+        - heading "Upload media" [level=2] [ref=f1e42]
+        - generic [ref=f1e46] [cursor=pointer]:
+          - generic [ref=f1e50]: Drop images or a ZIP here
+          - generic [ref=f1e51]: Supports JPG, PNG, WEBP, BMP, TIFF, ZIP
+        - button "Drop images or a ZIP here Supports JPG, PNG, WEBP, BMP, TIFF, ZIP" [ref=f1e52]
+        - generic [ref=f1e54]:
+          - generic [ref=f1e55]: 0 files uploaded
+          - button "Clear all" [ref=f1e56] [cursor=pointer]
+      - button "Analyze media" [ref=f1e58] [cursor=pointer]
+    - region "Analysis results" [ref=f1e61]:
+      - generic [ref=f1e62]:
+        - generic [ref=f1e63]:
+          - region "Analysis summary" [ref=f1e64]:
+            - generic [ref=f1e71]:
+              - generic [ref=f1e72]: "0"
+              - generic [ref=f1e73]: Files analysed
+            - generic [ref=f1e79]:
+              - generic [ref=f1e80]: "0"
+              - generic [ref=f1e81]: Flagged for review
+            - generic [ref=f1e87]:
+              - generic [ref=f1e88]: "0"
+              - generic [ref=f1e89]: Errors
+          - generic [ref=f1e90]: Analysis results appear here after you analyze media.
+          - generic [ref=f1e98]:
+            - heading "ELA evidence" [level=2] [ref=f1e99]
+            - generic [ref=f1e104]: ELA evidence will appear for completed checks.
+          - generic [ref=f1e106]:
+            - heading "Ask about this image" [level=2] [ref=f1e107]
+            - generic [ref=f1e110]:
+              - textbox "Ask about this image" [ref=f1e111]:
+                - /placeholder: e.g. Where might the image have been edited?
+              - button "Send question" [ref=f1e112] [cursor=pointer]
+            - generic [ref=f1e115]:
+              - button "Export PDF report" [ref=f1e116] [cursor=pointer]
+              - button "Download results" [ref=f1e120] [cursor=pointer]
+            - generic [ref=f1e124]:
+              - generic [ref=f1e125]:
+                - text: Email report to
+                - textbox "Email report to" [ref=f1e126]:
+                  - /placeholder: name@example.com
+              - generic [ref=f1e127]:
+                - text: Optional note
+                - textbox "Optional note" [ref=f1e128]:
+                  - /placeholder: Add a short note
+              - button "Email report" [ref=f1e129] [cursor=pointer]
+              - button "Test email" [ref=f1e130] [cursor=pointer]
+        - complementary "Run tools and status" [ref=f1e132]:
+          - heading "Run tools" [level=2] [ref=f1e134]
+          - generic [ref=f1e135]:
+            - generic [ref=f1e136]:
+              - heading "Run summary" [level=3] [ref=f1e137]
+              - generic [ref=f1e138]: Files 0 · Flagged 0 · Errors 0 · 0.00 s · Threshold 0.50
+            - generic [ref=f1e139]:
+              - heading "Recent runs" [level=3] [ref=f1e140]
+              - list [ref=f1e141]:
+                - listitem [ref=f1e142]: No saved runs yet.
+            - generic [ref=f1e143]:
+              - heading "Report actions" [level=3] [ref=f1e144]
+              - generic [ref=f1e145]:
+                - button "Export PDF" [ref=f1e146] [cursor=pointer]
+                - button "Download JSON" [ref=f1e147] [cursor=pointer]
+              - generic [ref=f1e148]:
+                - generic [ref=f1e149]:
+                  - textbox "Recipient email" [ref=f1e150]
+                  - button "Add" [ref=f1e151] [cursor=pointer]
+                - textbox "Optional note" [ref=f1e152]
+                - button "Confirm recipients" [ref=f1e153] [cursor=pointer]
+                - button "Email report" [disabled] [ref=f1e154] [cursor=pointer]
+                - button "Test email" [ref=f1e155] [cursor=pointer]
+            - generic [ref=f1e156]:
+              - heading "Model status" [level=3] [ref=f1e157]
+              - generic [ref=f1e158]:
+                - generic [ref=f1e159]:
+                  - generic [ref=f1e160]: openrouterOPENROUTER_API_KEY · Key set
+                  - generic [ref=f1e161]: nvidia/nemotron-3.5-lightning:free
+                - generic [ref=f1e162]:
+                  - generic [ref=f1e163]: geminiGEMINI_API_KEY · Key set
+                  - generic [ref=f1e164]: gemini-3.8-flash
+                - generic [ref=f1e165]:
+                  - generic [ref=f1e166]: opencode_zenOPENCODE_ZEN_API_KEY · Key set
+                  - generic [ref=f1e167]: glm-5.3-flash-free
+                - generic [ref=f1e168]: "Last run model: Not run yet"
+              - generic [ref=f1e169]: "Email configured · SMTP_FROM: Bhavishya0045@gmail.com. If SMTP_FROM differs from SMTP_USERNAME, Gmail may rewrite it."
+            - generic [ref=f1e170]:
+              - heading "Settings" [level=3] [ref=f1e171]
+              - generic [ref=f1e172]:
+                - text: Threshold 0.50
+                - slider "Threshold 0.50" [ref=f1e173] [cursor=pointer]: "0.5"
+              - generic [ref=f1e174]:
+                - text: Max file size (MB)
+                - spinbutton "Max file size (MB)" [ref=f1e175]: "50"
+              - button "Save for next run" [ref=f1e176] [cursor=pointer]
+            - generic [ref=f1e177]:
+              - heading "How to read results" [level=3] [ref=f1e178]
+              - list [ref=f1e179]:
+                - listitem [ref=f1e180]: Flagged means review, not proof.
+                - listitem [ref=f1e181]: Scores are uncalibrated signals, not probabilities.
+                - listitem [ref=f1e182]: Check the evidence and context before drawing conclusions.

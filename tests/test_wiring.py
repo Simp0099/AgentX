@@ -32,5 +32,6 @@ def test_gradio_app_routes_chat_tab_through_chat_handler():
     handler_text = (ROOT / "app" / "chat_handler.py").read_text()
 
     assert "from app.chat_handler import agent_chat as _agent_chat" in app_text
-    assert "return _agent_chat(message, image, state, detector=DETECTOR)" in app_text
+    assert "_agent_chat(message, image, state, detector=DETECTOR)" in app_text
+    assert "render_chat_card(result)" in app_text
     assert "def agent_chat(" in handler_text

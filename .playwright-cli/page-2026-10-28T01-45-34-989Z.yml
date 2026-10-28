@@ -1,0 +1,50 @@
+- generic [ref=f1e2]:
+  - banner [ref=f1e3]:
+    - generic "Deepfake Localizer" [ref=f1e4]
+    - navigation "Workspace views" [ref=f1e10]:
+      - button "Overview" [ref=f1e11] [cursor=pointer]
+      - button "Batch analysis" [ref=f1e14] [cursor=pointer]
+      - button "Reports" [ref=f1e18] [cursor=pointer]
+    - generic [ref=f1e22]:
+      - button "Toggle theme" [ref=f1e23] [cursor=pointer]
+      - button "Open analysis settings" [ref=f1e27] [cursor=pointer]
+      - button "Profile" [ref=f1e31] [cursor=pointer]
+  - main [ref=f1e36]:
+    - generic [ref=f1e37]:
+      - generic [ref=f1e38]:
+        - heading "Media authenticity analysis" [level=1] [ref=f1e39]
+        - paragraph [ref=f1e40]: Detect suspicious edits and inspect likely tampered regions.
+      - region [ref=f1e41]:
+        - heading "Upload media" [level=2] [ref=f1e42]
+        - generic [ref=f1e46] [cursor=pointer]:
+          - generic [ref=f1e50]: Drop images or a ZIP here
+          - generic [ref=f1e51]: Supports JPG, PNG, WEBP, BMP, TIFF, ZIP
+        - button "Drop images or a ZIP here Supports JPG, PNG, WEBP, BMP, TIFF, ZIP" [ref=f1e52]
+        - generic [ref=f1e54]:
+          - generic [ref=f1e55]: 0 files uploaded
+          - button "Clear all" [ref=f1e56] [cursor=pointer]
+      - button "Analyze media" [ref=f1e58] [cursor=pointer]
+    - region "Analysis results" [ref=f1e61]:
+      - region "Analysis summary" [ref=f1e62]:
+        - generic [ref=f1e69]:
+          - generic [ref=f1e70]: "0"
+          - generic [ref=f1e71]: Files analysed
+        - generic [ref=f1e77]:
+          - generic [ref=f1e78]: "0"
+          - generic [ref=f1e79]: Flagged for review
+        - generic [ref=f1e85]:
+          - generic [ref=f1e86]: "0"
+          - generic [ref=f1e87]: Errors
+      - generic [ref=f1e88]: Analysis results appear here after you analyze media.
+      - generic [ref=f1e96]:
+        - heading "ELA evidence" [level=2] [ref=f1e97]
+        - generic [ref=f1e102]: ELA evidence will appear for completed checks.
+      - generic [ref=f1e104]:
+        - heading "Ask about this image" [level=2] [ref=f1e105]
+        - generic [ref=f1e108]:
+          - textbox "Ask about this image" [ref=f1e109]:
+            - /placeholder: e.g. Where might the image have been edited?
+          - button "Send question" [ref=f1e110] [cursor=pointer]
+        - generic [ref=f1e113]:
+          - button "Export PDF report" [ref=f1e114] [cursor=pointer]
+          - button "Download results" [ref=f1e118] [cursor=pointer]

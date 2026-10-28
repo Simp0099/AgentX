@@ -29,16 +29,23 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import os
+import re
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from agent.agent_config import get_agent_config, model_entries
 from agent.agent_tools import TOOL_SCHEMAS, ToolContext, run_tool
+from agent.env import load_env
 from agent.memory import trim_messages
 from agent.memory_store import image_hash, load_investigation, save_investigation
 from agent.prompts import SYSTEM_PROMPT, build_user_message
@@ -56,12 +63,97 @@ BACKOFF_SECONDS = (1.0, 2.0)
 
 # Attempts against one model before moving to the next one.
 MAX_PROVIDER_RETRIES = 2
+_MODEL_COOLDOWNS: dict[str, float] = {}
+LAST_USED_MODELS: dict[str, str] = {}
+_LOGGER = logging.getLogger(__name__)
 
 ENV_UPLOAD_ROOT = "AGENT_UPLOAD_ROOT"
 DEFAULT_UPLOAD_ROOT = "artifacts/uploads"
 
 ROOT = Path(__file__).resolve().parent.parent
 LOG_PATH = ROOT / "logs" / "agent.log"
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    category: str
+    cause: str
+    retry_after: float | None = None
+
+
+def _provider_failure(exc: Exception) -> ProviderFailure:
+    """Classify an SDK/provider exception using status, headers and safe text."""
+    response = getattr(exc, "response", None)
+    status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+    headers = getattr(exc, "headers", None) or getattr(response, "headers", None) or {}
+    try:
+        retry_after_value = headers.get("Retry-After") or headers.get("retry-after")
+    except AttributeError:
+        retry_after_value = None
+    try:
+        retry_after = max(0.0, float(retry_after_value)) if retry_after_value is not None else None
+    except (TypeError, ValueError):
+        try:
+            retry_after = (
+                max(
+                    0.0,
+                    (
+                        parsedate_to_datetime(str(retry_after_value)) - datetime.now(timezone.utc)
+                    ).total_seconds(),
+                )
+                if retry_after_value is not None
+                else None
+            )
+        except (TypeError, ValueError, OverflowError):
+            retry_after = None
+    text = str(exc)
+    lowered = text.casefold()
+    if status is None:
+        match = re.search(r"\b([45]\d\d)\b", text)
+        status = int(match.group(1)) if match else None
+    cause = f"{type(exc).__name__}: {text[:300]}"
+    if (
+        status == 429
+        or (retry_after is not None and status is None)
+        or any(
+            term in lowered
+            for term in (
+                "quota",
+                "rate limit",
+                "rate-limit",
+                "too many requests",
+                "token exhausted",
+                "token exhaustion",
+            )
+        )
+    ):
+        return ProviderFailure("quota", cause, retry_after)
+    if status in (400, 401) or "invalid request" in lowered or "authentication" in lowered:
+        return ProviderFailure("fatal", cause)
+    if status is not None and 500 <= int(status) <= 599:
+        return ProviderFailure("transient", cause, retry_after)
+    if isinstance(exc, (TimeoutError, ConnectionError)) or any(
+        term in lowered
+        for term in ("timeout", "timed out", "connection", "temporarily unavailable")
+    ):
+        return ProviderFailure("transient", cause)
+    if status is not None and 400 <= int(status) <= 499:
+        return ProviderFailure("fatal", cause)
+    return ProviderFailure("fatal", cause)
+
+
+def _log_switch(model: str, next_model: str | None, reason: str) -> None:
+    """Log a provider route change without including request credentials."""
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    destination = next_model or "none"
+    line = f"{stamp} model_switch from={model} to={destination} reason={reason[:300]}"
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_PATH, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        pass
+    _LOGGER.warning("%s", line)
 
 
 @dataclass
@@ -105,19 +197,156 @@ def _build_client(endpoint: dict[str, Any]) -> Any:
     The key is read from the environment variable NAMED in the config; its
     value never appears here or in any log.
     """
+    env_name = str(endpoint["api_key_env"])
+    load_env()
+    key = os.environ.get(env_name, "").strip()
+    if not key or key.casefold() in {"your_key_here", "replace_me", "changeme", "placeholder"}:
+        return None
+    config = get_agent_config()
+    if str(endpoint["provider"]).lower() == "anthropic":
+        return _AnthropicCompatClient(
+            key,
+            str(endpoint["base_url"]),
+            float(config["request_timeout_seconds"]),
+        )
     from openai import OpenAI
 
-    env_name = str(endpoint["api_key_env"])
-    key = os.environ.get(env_name)
-    if not key:
-        raise RuntimeError(f"environment variable {env_name} is not set")
-    config = get_agent_config()
     return OpenAI(
         api_key=key,
         base_url=endpoint["base_url"],
         timeout=float(config["request_timeout_seconds"]),
         max_retries=0,  # retries are ours, so they are counted and bounded
     )
+
+
+class _AnthropicCompatClient:
+    """Translate the loop's OpenAI-shaped tool calls to Anthropic Messages."""
+
+    def __init__(self, api_key: str, base_url: str, timeout: float):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        tool_choice: str = "auto",
+        temperature: float = 0.0,
+    ) -> Any:
+        system = "\n\n".join(
+            str(item.get("content") or "") for item in messages if item.get("role") == "system"
+        )
+        converted: list[dict[str, Any]] = []
+        for item in messages:
+            role = item.get("role")
+            if role == "system":
+                continue
+            if role == "tool":
+                result = {
+                    "type": "tool_result",
+                    "tool_use_id": item.get("tool_call_id", ""),
+                    "content": str(item.get("content", "")),
+                }
+                if converted and converted[-1]["role"] == "user":
+                    converted[-1]["content"].append(result)
+                else:
+                    converted.append({"role": "user", "content": [result]})
+                continue
+            blocks: list[dict[str, Any]] = []
+            if role == "assistant" and item.get("tool_calls"):
+                if item.get("content"):
+                    blocks.append({"type": "text", "text": str(item["content"])})
+                for call in item["tool_calls"]:
+                    function = call.get("function", {})
+                    try:
+                        arguments = json.loads(function.get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        arguments = {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": call.get("id", ""),
+                            "name": function.get("name", ""),
+                            "input": arguments,
+                        }
+                    )
+            elif isinstance(item.get("content"), str):
+                blocks.append({"type": "text", "text": item["content"]})
+            else:
+                blocks = item.get("content") or []
+            converted.append(
+                {"role": "assistant" if role == "assistant" else "user", "content": blocks}
+            )
+
+        anthropic_tools = []
+        for tool in tools:
+            function = tool.get("function", {})
+            anthropic_tools.append(
+                {
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "input_schema": function.get(
+                        "parameters", {"type": "object", "properties": {}}
+                    ),
+                }
+            )
+        payload: dict[str, Any] = {
+            "model": model,
+            "max_tokens": 2048,
+            "messages": converted,
+            "temperature": temperature,
+        }
+        if system:
+            payload["system"] = system
+        if anthropic_tools:
+            payload["tools"] = anthropic_tools
+            payload["tool_choice"] = {"type": "auto" if tool_choice == "auto" else "any"}
+        request = urllib.request.Request(
+            f"{self.base_url}/messages",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "content-type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                raw = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise ProviderHTTPError(exc.code) from None
+        blocks = raw.get("content", [])
+        text = "\n".join(block.get("text", "") for block in blocks if block.get("type") == "text")
+        tool_calls = [
+            SimpleNamespace(
+                id=block.get("id", ""),
+                type="function",
+                function=SimpleNamespace(
+                    name=block.get("name", ""),
+                    arguments=json.dumps(block.get("input", {})),
+                ),
+            )
+            for block in blocks
+            if block.get("type") == "tool_use"
+        ]
+        message = SimpleNamespace(content=text, tool_calls=tool_calls or None)
+        finish_reason = "length" if raw.get("stop_reason") == "max_tokens" else "stop"
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason=finish_reason)]
+        )
+
+
+class ProviderHTTPError(RuntimeError):
+    """Status-only provider error that cannot disclose request credentials."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code} from Anthropic")
+        self.status_code = status_code
 
 
 def _initial_messages(
@@ -314,18 +543,44 @@ def _model_verdict(answer: str) -> Verdict | None:
     return None
 
 
-def _assess_answer(
-    answer: str, record: InvestigationRecord, grounded: Verdict
-) -> tuple[str, str]:
-    """Append computed review/confidence guidance from recorded evidence."""
-    from agent.config import get_config
+def _assess_answer(answer: str, record: InvestigationRecord, grounded: Verdict) -> tuple[str, str]:
+    """Append review guidance and the required limits to an answer."""
+    import re
 
+    from agent.config import get_config
+    from agent.prompts import CAVEAT_TEXT
+
+    caveat_heading = "Limits you must state rather than hide"
+    if caveat_heading in answer:
+        answer = answer.split(caveat_heading, 1)[0].rstrip()
     clean_lines = [
-        line for line in answer.splitlines()
+        line
+        for line in answer.splitlines()
         if not line.startswith("Needs human review:")
-        and line not in {"Confidence: low.", "Confidence: medium.", "Confidence: high."}
+        and not re.match(r"\s*(?:[*_#]+\s*)?(?:confidence|probability|likelihood)\s*:", line, re.I)
     ]
-    answer = "\n".join(clean_lines).rstrip()
+    answer = "\n".join(clean_lines).strip()
+    answer = re.sub(
+        r"(?i)\b(?:this\s+)?image\s+(?:clearly\s+)?(?:proves?|demonstrates)\b"
+        r"[^.!?\n]*[.!?]?",
+        "The detector output is a review signal, not proof.",
+        answer,
+    )
+    answer = re.sub(
+        r"(?i)(?<!not )\b(?:strong\s+)?evidence\s+of\s+(?:image\s+)?"
+        r"(?:splicing|tampering|manipulation)\b",
+        "a region flagged for review by the detector",
+        answer,
+    )
+    answer = re.sub(
+        r"(?i)\bflagged\s+(?:the\s+)?image\s+for\s+review\s+as\s+"
+        r"(?:tampered|manipulated|spliced)\b",
+        "flagged the image for review",
+        answer,
+    )
+    answer = re.sub(
+        r"(?im)^.*\b(?:confidence|probability|likelihood)\b.*$", "", answer
+    ).strip()
     settings = get_config().get("forensics", {})
     low = float(settings.get("uncertain_low", 0.4))
     high = float(settings.get("uncertain_high", 0.6))
@@ -352,7 +607,7 @@ def _assess_answer(
     confidence = "low" if reasons else "high" if score is not None else "medium"
     if reasons:
         answer += "\n\nNeeds human review: " + "; ".join(reasons) + "."
-    answer += f"\n\nConfidence: {confidence}."
+    answer = f"{answer}\n\n{CAVEAT_TEXT}" if answer else CAVEAT_TEXT
     return answer, confidence
 
 
@@ -368,6 +623,7 @@ def run_agent_full(
     max_steps: int | None = None,
     client: Any | None = None,
     use_memory: bool = True,
+    threshold: float | None = None,
 ) -> AgentResult:
     """Run one conversation to completion and return everything it produced."""
     config = get_agent_config()
@@ -377,7 +633,11 @@ def run_agent_full(
 
     messages = _initial_messages(goal, image_path, history, config)
     record = _new_record(goal, image_path)
-    ctx = ToolContext(upload_root=_upload_root(), threshold=_default_threshold())
+    load_env()
+    ctx = ToolContext(
+        upload_root=_upload_root(),
+        threshold=_default_threshold() if threshold is None else float(threshold),
+    )
 
     config_hash = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
@@ -418,14 +678,39 @@ def run_agent_full(
     answer = ""
     stopped_reason = "final_answer"
     active = client
+    clients: dict[int, Any] = {0: client} if client is not None else {}
     identical_calls: dict[str, int] = {}
     retry_limit_reached = False
 
+    tried: list[str] = []
+    unavailable: list[str] = []
+
+    def select_usable(start: int) -> int | None:
+        for candidate in range(start, len(endpoints)):
+            candidate_model = str(endpoints[candidate]["model"])
+            if _MODEL_COOLDOWNS.get(candidate_model, 0.0) > time.monotonic():
+                continue
+            if candidate not in clients:
+                clients[candidate] = _build_client(endpoints[candidate])
+            if clients[candidate] is None:
+                env_name = str(endpoints[candidate]["api_key_env"])
+                detail = f"skipped {candidate_model}: {env_name} not set"
+                record.errors.append(detail)
+                unavailable.append(detail)
+                continue
+            return candidate
+        return None
+
+    selected = select_usable(0)
+    if selected is None:
+        cooling = [str(item["model"]) for item in endpoints]
+        detail = "no configured free-model credentials"
+        if unavailable:
+            detail += "; skipped: " + "; ".join(unavailable)
+        return _unavailable(record, messages, steps, detail, cooling)
+    endpoint_index = selected
     if active is None:
-        try:
-            active = _build_client(endpoints[0])
-        except Exception as exc:
-            return _unavailable(record, messages, steps, f"{exc}")
+        active = clients[endpoint_index]
 
     while True:
         if steps >= limit:
@@ -433,7 +718,10 @@ def run_agent_full(
             stopped_reason = "max_steps"
             break
 
-        endpoint = endpoints[min(endpoint_index, len(endpoints) - 1)]
+        endpoint = endpoints[endpoint_index]
+        model_name = str(endpoint["model"])
+        if not tried or tried[-1] != model_name:
+            tried.append(model_name)
         try:
             response = active.chat.completions.create(
                 model=endpoint["model"],
@@ -442,30 +730,59 @@ def run_agent_full(
                 tool_choice="auto",
                 temperature=temperature,
             )
-        except Exception as exc:  # 429, timeout, 400, 5xx, connection failure
-            if retries < MAX_PROVIDER_RETRIES:
+        except Exception as exc:
+            failure = _provider_failure(exc)
+            if failure.category == "transient" and retries < MAX_PROVIDER_RETRIES:
                 retries += 1
                 delay = BACKOFF_SECONDS[min(retries - 1, len(BACKOFF_SECONDS) - 1)]
+                if failure.retry_after is not None:
+                    maximum = float(config.get("retry_after_max_seconds", 60))
+                    delay = min(failure.retry_after, maximum)
                 if delay:
                     time.sleep(delay)
                 continue
-            if endpoint_index >= len(endpoints) - 1:
-                detail = f"{type(exc).__name__}: {str(exc)[:300]}"
-                record.errors.append(f"provider failed on {endpoint['model']}: {detail}")
-                return _unavailable(record, messages, steps, detail)
-            record.errors.append(
-                f"provider error on {endpoint['model']}; falling back to "
-                f"{endpoints[endpoint_index + 1]['model']}"
-            )
-            endpoint_index += 1
+            if failure.category == "fatal":
+                detail = f"{model_name} failed ({failure.category}): {failure.cause}"
+                unavailable.append(detail)
+                record.errors.append(detail)
+                next_index = select_usable(endpoint_index + 1)
+                if next_index is None:
+                    return _unavailable(record, messages, steps, "; ".join(unavailable), tried)
+                endpoint_index = next_index
+                if client is None:
+                    active = clients[endpoint_index]
+                retries = 0
+                continue
+            if failure.category == "quota":
+                cooldown = float(config.get("cooldown_seconds", 900))
+                _MODEL_COOLDOWNS[model_name] = time.monotonic() + cooldown
+            detail = f"{model_name} failed ({failure.category}): {failure.cause}"
+            unavailable.append(detail)
+            record.errors.append(detail)
+            next_index = select_usable(endpoint_index + 1)
             retries = 0
+            if next_index is None:
+                _log_switch(model_name, None, failure.category)
+                models = ", ".join(tried)
+                cause_text = "; ".join(unavailable)
+                return _unavailable(
+                    record,
+                    messages,
+                    steps,
+                    f"{cause_text}; models tried: {models}",
+                    tried,
+                )
+            next_model = str(endpoints[next_index]["model"])
+            _log_switch(model_name, next_model, failure.category)
+            record.errors.append(
+                f"provider switched from {model_name} to {next_model}: {failure.category}"
+            )
+            endpoint_index = next_index
             if client is None:
-                try:
-                    active = _build_client(endpoints[endpoint_index])
-                except Exception as build_exc:
-                    return _unavailable(record, messages, steps, f"{build_exc}")
+                active = clients[endpoint_index]
             continue
 
+        LAST_USED_MODELS[str(endpoint["provider"])] = model_name
         steps += 1
         retries = 0
         message = response.choices[0].message
@@ -553,6 +870,7 @@ def _unavailable(
     messages: list[dict[str, Any]],
     steps: int,
     detail: str,
+    tried: list[str] | None = None,
 ) -> AgentResult:
     """Build the structured failure. Never a fabricated final answer."""
     record.errors.append(f"model unavailable: {detail}")
@@ -561,7 +879,14 @@ def _unavailable(
     record.verdict_reasons = reasons
     record.rationale = "; ".join(reasons)
     return AgentResult(
-        answer=f"Model unavailable: {detail}",
+        answer=(
+            f"Model unavailable: {detail}"
+            + (
+                f". Models tried: {', '.join(tried)}"
+                if tried and "models tried:" not in detail
+                else ""
+            )
+        ),
         messages=messages,
         record=record,
         steps=steps,

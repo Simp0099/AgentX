@@ -1,0 +1,140 @@
+- generic [ref=e21]:
+  - main [ref=e22]:
+    - generic [ref=e33]:
+      - generic [ref=e34]:
+        - heading "Deepfake / Tampering Region Localizer" [level=1] [ref=e39]
+        - button "⚙" [active] [ref=e40] [cursor=pointer]
+      - generic [ref=e41]:
+        - generic [ref=e42]:
+          - generic [aria-hidden] [ref=e43]:
+            - button [ref=e44] [cursor=pointer]: Analysis
+            - button [ref=e45] [cursor=pointer]: Settings
+          - tablist [ref=e46]:
+            - tab "Analysis" [selected] [ref=e47] [cursor=pointer]
+            - tab "Settings" [ref=e48] [cursor=pointer]
+        - tabpanel [ref=e49]:
+          - generic [ref=e50]:
+            - generic [ref=e54]:
+              - heading "Deepfake / Tampering Region Localizer" [level=1] [ref=e55]
+              - paragraph [ref=e56]: Upload one or more images to run the deterministic forensic checks. The investigation record supplies the verdict, uncalibrated score, and executed-check log.
+              - paragraph [ref=e57]:
+                - strong [ref=e58]: Limitations.
+                - text: Trained on CASIA v2 splices. Heavy re-compression, screenshots, social-media re-encoding, and fully-generated images may not produce reliable splice signals. Treat output as a signal, not proof.
+            - generic [ref=e59]:
+              - generic [ref=e60]:
+                - generic [ref=e61]:
+                  - generic: Upload one or more images
+                  - button "Click to upload or drop files" [ref=e62] [cursor=pointer]:
+                    - generic [ref=e63]:
+                      - text: Drop File Here
+                      - generic [ref=e68]: "- or -"
+                      - text: Click to Upload
+                - generic [ref=e69]:
+                  - generic [ref=e71]:
+                    - generic [ref=e72]: Investigation goal
+                    - combobox "Investigation goal" [ref=e76]: Quick check
+                  - generic [ref=e78]:
+                    - generic [ref=e79]: Custom goal
+                    - textbox "Custom goal" [ref=e81]:
+                      - /placeholder: ""
+                - button "Analyze media" [ref=e82] [cursor=pointer]
+                - generic [ref=e161]:
+                  - heading "Analysis settings" [level=3] [ref=e166]
+                  - generic [ref=e167]:
+                    - generic [ref=e169]:
+                      - generic [ref=e170]:
+                        - generic [ref=e171]:
+                          - generic [ref=e172]: Detection threshold
+                          - generic [ref=e173]: "Active saved default: 0.50. This value is passed to the run."
+                        - generic [ref=e174]:
+                          - spinbutton "number input for Detection threshold" [ref=e175]: "0.5"
+                          - button "Reset to default value" [ref=e176] [cursor=pointer]: ↺
+                      - generic [ref=e177]:
+                        - generic [ref=e178]: "0"
+                        - slider "range slider for Detection threshold" [ref=e179] [cursor=pointer]: "0.5"
+                        - generic [ref=e180]: "1"
+                    - generic [ref=e182]:
+                      - generic [ref=e183]: Max file size per image (MB)
+                      - spinbutton "Max file size per image (MB)" [ref=e184]: "50"
+                    - generic [ref=e186]:
+                      - generic [ref=e187]: Max ZIP members
+                      - spinbutton "Max ZIP members" [ref=e188]: "100"
+                    - generic [ref=e190]:
+                      - generic [ref=e191]: Batch time limit (seconds)
+                      - spinbutton "Batch time limit (seconds)" [ref=e192]: "120"
+                    - generic [ref=e194]:
+                      - generic [ref=e195]: Max workers
+                      - spinbutton "Max workers" [ref=e196]: "2"
+                    - generic [ref=e198] [cursor=pointer]:
+                      - checkbox "Run ELA" [checked] [ref=e199]
+                      - generic [ref=e200]: Run ELA
+                    - generic [ref=e202] [cursor=pointer]:
+                      - checkbox "Run metadata inspection" [checked] [ref=e203]
+                      - generic [ref=e204]: Run metadata inspection
+                  - button "Save analysis settings" [ref=e205] [cursor=pointer]
+                - button "Batch ZIP analysis ▼" [ref=e84] [cursor=pointer]:
+                  - generic [ref=e85]: Batch ZIP analysis
+                  - generic [ref=e86]: ▼
+              - generic [ref=e87]:
+                - generic [ref=e91]:
+                  - generic [ref=e92]:
+                    - strong [ref=e93]: "0"
+                    - generic [ref=e94]: Files analyzed
+                  - generic [ref=e95]:
+                    - strong [ref=e96]: "0"
+                    - generic [ref=e97]: Flagged
+                  - generic [ref=e98]:
+                    - strong [ref=e99]: "0"
+                    - generic [ref=e100]: Errors
+                - generic [ref=e101]:
+                  - generic [ref=e102]:
+                    - generic [ref=e103]:
+                      - generic: Results by file
+                      - generic "Empty value" [ref=e104]
+                    - generic [ref=e110]:
+                      - generic: Region overlays
+                      - generic "Empty value" [ref=e111]
+                    - generic [ref=e117]:
+                      - generic: ELA evidence
+                      - generic "Empty value" [ref=e118]
+                    - button "Ask about this image ▼" [ref=e125] [cursor=pointer]:
+                      - generic [ref=e126]: Ask about this image
+                      - generic [ref=e127]: ▼
+                  - generic [ref=e128]:
+                    - paragraph [ref=e133]: Detailed findings appear after analysis.
+                    - heading "Email report" [level=3] [ref=e138]
+                    - generic [ref=e139]:
+                      - generic [ref=e141]:
+                        - generic [ref=e142]: Existing report PDF path
+                        - textbox "Existing report PDF path" [ref=e144]:
+                          - /placeholder: ""
+                      - generic [ref=e146]:
+                        - generic [ref=e147]: Recipients (comma-separated)
+                        - textbox "Recipients (comma-separated)" [ref=e149]:
+                          - /placeholder: ""
+                      - generic [ref=e151]:
+                        - generic [ref=e152]: Optional note
+                        - textbox "Optional note" [ref=e154]:
+                          - /placeholder: ""
+                    - generic [ref=e155]:
+                      - button "Confirm recipients" [ref=e156] [cursor=pointer]
+                      - button "Send" [ref=e157] [cursor=pointer]
+  - status [ref=e23]
+  - contentinfo "Gradio footer navigation" [ref=e24]:
+    - link [ref=e158] [cursor=pointer]:
+      - /url: http://127.0.0.1:7864/gradio_api/runs
+      - text: Runs
+      - img "Runs" [ref=e159]
+    - generic [ref=e160]: ·
+    - button [ref=e25] [cursor=pointer]:
+      - text: Use via API
+      - img "logo" [ref=e26]
+    - generic [ref=e27]: ·
+    - link [ref=e28] [cursor=pointer]:
+      - /url: https://gradio.app
+      - text: Built with Gradio
+      - img "logo" [ref=e29]
+    - generic [ref=e30]: ·
+    - button [ref=e31] [cursor=pointer]:
+      - text: Settings
+      - img "Settings" [ref=e32]

@@ -1,0 +1,151 @@
+- generic [ref=f1e21]:
+  - main [ref=f1e22]:
+    - generic [ref=f1e23]:
+      - generic [ref=f1e24]:
+        - heading "Deepfake / Tampering Region Localizer" [level=1] [ref=f1e29]
+        - button "⚙" [active] [ref=f1e30] [cursor=pointer]
+      - generic [ref=f1e31]:
+        - generic [ref=f1e32]:
+          - generic [aria-hidden] [ref=f1e33]:
+            - button [ref=f1e34] [cursor=pointer]: Analysis
+            - button [ref=f1e35] [cursor=pointer]: Settings
+          - tablist [ref=f1e36]:
+            - tab "Analysis" [selected] [ref=f1e37] [cursor=pointer]
+            - tab "Settings" [ref=f1e38] [cursor=pointer]
+        - tabpanel [ref=f1e39]:
+          - generic [ref=f1e40]:
+            - generic [ref=f1e44]:
+              - heading "Deepfake / Tampering Region Localizer" [level=1] [ref=f1e45]
+              - paragraph [ref=f1e46]: Upload one or more images to run the deterministic forensic checks. The investigation record supplies the verdict, uncalibrated score, and executed-check log.
+              - paragraph [ref=f1e47]:
+                - strong [ref=f1e48]: Limitations.
+                - text: Trained on CASIA v2 splices. Heavy re-compression, screenshots, social-media re-encoding, and fully-generated images may not produce reliable splice signals. Treat output as a signal, not proof.
+            - blockquote [ref=f1e53]:
+              - paragraph [ref=f1e54]:
+                - text: "No trained checkpoint loaded:"
+                - code [ref=f1e55]: "No checkpoint at checkpoints/not-present.keras. Train one first: python -m src.train --config configs/default.yaml"
+            - generic [ref=f1e56]:
+              - generic [ref=f1e57]:
+                - generic [ref=f1e58]:
+                  - generic: Upload one or more images
+                  - button "Click to upload or drop files" [ref=f1e59] [cursor=pointer]:
+                    - generic [ref=f1e60]:
+                      - text: Drop File Here
+                      - generic [ref=f1e65]: "- or -"
+                      - text: Click to Upload
+                - generic [ref=f1e66]:
+                  - generic [ref=f1e68]:
+                    - generic [ref=f1e69]: Investigation goal
+                    - combobox "Investigation goal" [ref=f1e73]: Quick check
+                  - generic [ref=f1e75]:
+                    - generic [ref=f1e76]: Custom goal
+                    - textbox "Custom goal" [ref=f1e78]:
+                      - /placeholder: ""
+                - button "Analyze media" [ref=f1e79] [cursor=pointer]
+                - generic [ref=f1e182]:
+                  - heading "Analysis settings" [level=3] [ref=f1e187]
+                  - generic [ref=f1e188]:
+                    - generic [ref=f1e190]:
+                      - generic [ref=f1e191]:
+                        - generic [ref=f1e192]:
+                          - generic [ref=f1e193]: Detection threshold
+                          - generic [ref=f1e194]: "Active saved default: 0.50. This value is passed to the run."
+                        - generic [ref=f1e195]:
+                          - spinbutton "number input for Detection threshold" [ref=f1e196]: "0.5"
+                          - button "Reset to default value" [ref=f1e197] [cursor=pointer]: ↺
+                      - generic [ref=f1e198]:
+                        - generic [ref=f1e199]: "0"
+                        - slider "range slider for Detection threshold" [ref=f1e200] [cursor=pointer]: "0.5"
+                        - generic [ref=f1e201]: "1"
+                    - generic [ref=f1e203]:
+                      - generic [ref=f1e204]: Max file size per image (MB)
+                      - spinbutton "Max file size per image (MB)" [ref=f1e205]: "50"
+                    - generic [ref=f1e207]:
+                      - generic [ref=f1e208]: Max ZIP members
+                      - spinbutton "Max ZIP members" [ref=f1e209]: "100"
+                    - generic [ref=f1e211]:
+                      - generic [ref=f1e212]: Batch time limit (seconds)
+                      - spinbutton "Batch time limit (seconds)" [ref=f1e213]: "120"
+                    - generic [ref=f1e215]:
+                      - generic [ref=f1e216]: Max workers
+                      - spinbutton "Max workers" [ref=f1e217]: "2"
+                    - generic [ref=f1e219] [cursor=pointer]:
+                      - checkbox "Run ELA" [checked] [ref=f1e220]
+                      - generic [ref=f1e221]: Run ELA
+                    - generic [ref=f1e223] [cursor=pointer]:
+                      - checkbox "Run metadata inspection" [checked] [ref=f1e224]
+                      - generic [ref=f1e225]: Run metadata inspection
+                  - button "Save analysis settings" [ref=f1e226] [cursor=pointer]
+                - button "Batch ZIP analysis ▼" [ref=f1e81] [cursor=pointer]:
+                  - generic [ref=f1e82]: Batch ZIP analysis
+                  - generic [ref=f1e83]: ▼
+              - generic [ref=f1e84]:
+                - generic [ref=f1e88]:
+                  - generic [ref=f1e89]:
+                    - strong [ref=f1e90]: "0"
+                    - generic [ref=f1e91]: Files analyzed
+                  - generic [ref=f1e92]:
+                    - strong [ref=f1e93]: "0"
+                    - generic [ref=f1e94]: Flagged
+                  - generic [ref=f1e95]:
+                    - strong [ref=f1e96]: "0"
+                    - generic [ref=f1e97]: Errors
+                - generic [ref=f1e98]:
+                  - generic [ref=f1e99]:
+                    - generic [ref=f1e100]:
+                      - generic: Results by file
+                      - generic "Empty value" [ref=f1e101]
+                    - generic [ref=f1e107]:
+                      - generic: Region overlays
+                      - generic "Empty value" [ref=f1e108]
+                    - generic [ref=f1e114]:
+                      - generic: ELA evidence
+                      - generic "Empty value" [ref=f1e115]
+                    - button "Ask about this image ▼" [ref=f1e122] [cursor=pointer]:
+                      - generic [ref=f1e123]: Ask about this image
+                      - generic [ref=f1e124]: ▼
+                  - generic [ref=f1e125]:
+                    - paragraph [ref=f1e130]: Detailed findings appear after analysis.
+                    - heading "Recent runs" [level=3] [ref=f1e135]
+                    - article [ref=f1e139]:
+                      - generic "Screenshot 2026-10-24 at 4.14.03 PM.png" [ref=f1e140]
+                      - generic [ref=f1e141]:
+                        - generic [ref=f1e142]: Flagged for review
+                        - generic [ref=f1e143]: Score 0.976
+                      - generic [ref=f1e144]: 2026-10-28T02:16:39.731Z
+                    - heading "Email report" [level=3] [ref=f1e149]
+                    - generic [ref=f1e150]:
+                      - generic [ref=f1e152]:
+                        - generic [ref=f1e153]: Existing report PDF path
+                        - textbox "Existing report PDF path" [ref=f1e155]:
+                          - /placeholder: ""
+                      - generic [ref=f1e157]:
+                        - generic [ref=f1e158]: Recipients (comma-separated)
+                        - textbox "Recipients (comma-separated)" [ref=f1e160]:
+                          - /placeholder: ""
+                      - generic [ref=f1e162]:
+                        - generic [ref=f1e163]: Optional note
+                        - textbox "Optional note" [ref=f1e165]:
+                          - /placeholder: ""
+                    - generic [ref=f1e166]:
+                      - button "Confirm recipients" [ref=f1e167] [cursor=pointer]
+                      - button "Send" [ref=f1e168] [cursor=pointer]
+  - status [ref=f1e169]
+  - contentinfo "Gradio footer navigation" [ref=f1e170]:
+    - link [ref=f1e171] [cursor=pointer]:
+      - /url: http://127.0.0.1:7864/gradio_api/runs
+      - text: Runs
+      - img "Runs" [ref=f1e172]
+    - generic [ref=f1e173]: ·
+    - button [ref=f1e174] [cursor=pointer]:
+      - text: Use via API
+      - img "logo" [ref=f1e175]
+    - generic [ref=f1e176]: ·
+    - link [ref=f1e177] [cursor=pointer]:
+      - /url: https://gradio.app
+      - text: Built with Gradio
+      - img "logo" [ref=f1e178]
+    - generic [ref=f1e179]: ·
+    - button [ref=f1e180] [cursor=pointer]:
+      - text: Settings
+      - img "Settings" [ref=f1e181]
