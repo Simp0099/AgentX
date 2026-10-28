@@ -1,0 +1,67 @@
+- generic [ref=f3e2]:
+  - banner [ref=f3e3]:
+    - generic "Deepfake Localizer" [ref=f3e4]
+    - navigation "Workspace views" [ref=f3e10]:
+      - button "Overview" [ref=f3e11] [cursor=pointer]
+      - button "Batch analysis" [ref=f3e14] [cursor=pointer]
+      - button "Reports" [ref=f3e18] [cursor=pointer]
+    - generic [ref=f3e22]:
+      - button "Toggle theme" [ref=f3e23] [cursor=pointer]
+      - button "Open analysis settings" [ref=f3e27] [cursor=pointer]
+      - button "Profile" [ref=f3e31] [cursor=pointer]
+  - main [ref=f3e36]:
+    - generic [ref=f3e37]:
+      - generic [ref=f3e38]:
+        - heading "Media authenticity analysis" [level=1] [ref=f3e39]
+        - paragraph [ref=f3e40]: Detect suspicious edits and inspect likely tampered regions.
+      - region [ref=f3e41]:
+        - heading "Upload media" [level=2] [ref=f3e42]
+        - generic [ref=f3e46] [cursor=pointer]:
+          - generic [ref=f3e50]: Drop images or a ZIP here
+          - generic [ref=f3e51]: Supports JPG, PNG, WEBP, BMP, TIFF, ZIP
+        - button "Drop images or a ZIP here Supports JPG, PNG, WEBP, BMP, TIFF, ZIP" [active] [ref=f3e52]
+        - generic [ref=f3e53]:
+          - generic [ref=f3e54]:
+            - generic [ref=f3e55]: 1 file uploaded
+            - button "Clear all" [ref=f3e56] [cursor=pointer]
+          - generic [ref=f3e130]:
+            - generic [ref=f3e132]:
+              - generic "img.png" [ref=f3e133]
+              - generic [ref=f3e134]: 0.1 KB · Image
+            - generic [ref=f3e135]: Ready
+            - button "Remove img.png" [ref=f3e137] [cursor=pointer]: ×
+      - button "Analyze media" [ref=f3e58] [cursor=pointer]
+    - region "Analysis results" [ref=f3e61]:
+      - region "Analysis summary" [ref=f3e62]:
+        - generic [ref=f3e69]:
+          - generic [ref=f3e70]: "0"
+          - generic [ref=f3e71]: Files analysed
+        - generic [ref=f3e77]:
+          - generic [ref=f3e78]: "0"
+          - generic [ref=f3e79]: Flagged for review
+        - generic [ref=f3e85]:
+          - generic [ref=f3e86]: "0"
+          - generic [ref=f3e87]: Errors
+      - generic [ref=f3e88]: Analysis results appear here after you analyze media.
+      - generic [ref=f3e96]:
+        - heading "ELA evidence" [level=2] [ref=f3e97]
+        - generic [ref=f3e102]: ELA evidence will appear for completed checks.
+      - generic [ref=f3e104]:
+        - heading "Ask about this image" [level=2] [ref=f3e105]
+        - generic [ref=f3e108]:
+          - textbox "Ask about this image" [ref=f3e109]:
+            - /placeholder: e.g. Where might the image have been edited?
+          - button "Send question" [ref=f3e110] [cursor=pointer]
+        - generic [ref=f3e113]:
+          - button "Export PDF report" [ref=f3e114] [cursor=pointer]
+          - button "Download results" [ref=f3e118] [cursor=pointer]
+        - generic [ref=f3e122]:
+          - generic [ref=f3e123]:
+            - text: Email report to
+            - textbox "Email report to" [ref=f3e124]:
+              - /placeholder: name@example.com
+          - generic [ref=f3e125]:
+            - text: Optional note
+            - textbox "Optional note" [ref=f3e126]:
+              - /placeholder: Add a short note
+          - button "Email report" [ref=f3e127] [cursor=pointer]

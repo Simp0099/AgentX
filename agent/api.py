@@ -40,8 +40,10 @@ Logging
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -168,6 +170,15 @@ class ChatRequest(_StrictModel):
     image_path: str = Field(min_length=1)
     history: list[dict[str, Any]] = Field(default_factory=list)
     threshold: float | None = Field(default=None, ge=0.1, le=0.9)
+    require_llm: bool = False
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class AnalyzeImageRequest(_StrictModel):
+    image_path: str = Field(min_length=1)
+    goal: str = "quick_check"
+    goal_text: str = Field(default="", max_length=250)
+    threshold: float = Field(default=0.5, ge=0.1, le=0.9)
 
 
 class BatchRequest(_StrictModel):
@@ -177,6 +188,37 @@ class BatchRequest(_StrictModel):
 class ReportRequest(_StrictModel):
     image_paths: list[str] = Field(min_length=1, max_length=50)
     threshold: float = Field(default=0.5, ge=0.1, le=0.9)
+
+
+class EmailReportRequest(_StrictModel):
+    to: list[str] = Field(min_length=1, max_length=10)
+    message: str | None = Field(default=None, max_length=500)
+
+
+class TestEmailRequest(_StrictModel):
+    to: str = Field(min_length=3, max_length=254)
+
+
+class DashboardSettingsRequest(_StrictModel):
+    threshold: float = Field(ge=0.1, le=0.9)
+    max_file_bytes: int = Field(ge=1_000_000, le=500_000_000)
+
+
+class HistoryRequest(_StrictModel):
+    run: dict[str, Any]
+
+
+class ResultsExportRequest(_StrictModel):
+    files: list[dict[str, Any]] = Field(default_factory=list)
+    batch: dict[str, Any] | None = None
+    errors: list[str] = Field(default_factory=list)
+    threshold: float = Field(ge=0.1, le=0.9)
+    processing_seconds: float = Field(ge=0, default=0)
+
+
+class EmailReportResponse(BaseModel):
+    status: str
+    recipients: int
 
 
 # tool name -> request model. Keeping this explicit means a missing field is a
@@ -305,6 +347,173 @@ def api_health() -> dict[str, Any]:
     return {"status": "ok", "llm": llm}
 
 
+@app.get("/email/status", dependencies=[Depends(require_token)])
+def email_status() -> dict[str, Any]:
+    """Return SMTP readiness without disclosing credentials."""
+    from agent.email_report import email_settings
+    from agent.env import get_secret
+
+    settings = email_settings()
+    username = (get_secret("SMTP_USERNAME") or "").strip().casefold()
+    configured_from = (get_secret("SMTP_FROM") or "").strip().casefold()
+    settings["sender_differs"] = bool(configured_from and username and configured_from != username)
+    return settings
+
+
+@app.get("/api/model-status", dependencies=[Depends(require_token)])
+def model_status() -> dict[str, Any]:
+    from agent.agent_config import get_agent_config, model_entries
+
+    entries = model_entries(get_agent_config())
+    placeholders = {"your_key_here", "replace_me", "changeme", "placeholder"}
+    return {
+        "providers": [
+            {
+                "provider": item["provider"],
+                "model": item["model"],
+                "variable": item["api_key_env"],
+                "key_set": os.environ.get(item["api_key_env"], "").strip().casefold()
+                not in {"", *placeholders},
+            }
+            for item in entries
+        ]
+    }
+
+
+@app.post("/email/test", dependencies=[Depends(require_token)])
+def test_email(payload: TestEmailRequest) -> dict[str, str]:
+    """Send a short SMTP setup test without a report attachment."""
+    import smtplib
+    from email.message import EmailMessage
+
+    from agent.email_report import (
+        _ADDRESS,
+        _LOGGER,
+        email_settings,
+        smtp_error_message,
+        smtp_exception_code,
+    )
+    from agent.env import get_secret
+
+    settings = email_settings()
+    if not settings["configured"]:
+        raise HTTPException(
+            status_code=503, detail="Missing SMTP configuration: " + ", ".join(settings["missing"])
+        )
+    if not _ADDRESS.fullmatch(payload.to):
+        raise HTTPException(status_code=400, detail="Enter a valid recipient address.")
+    username = get_secret("SMTP_USERNAME") or ""
+    password = "".join((get_secret("SMTP_PASSWORD") or "").split())
+    message = EmailMessage()
+    message["Subject"] = "Deepfake Localizer email test"
+    message["From"] = settings["from"]
+    message["To"] = payload.to
+    message.set_content("Your email delivery setup is working.")
+    try:
+        if settings["starttls"]:
+            with smtplib.SMTP(str(settings["host"]), int(settings["port"]), timeout=20) as smtp:
+                smtp.starttls()
+                smtp.login(username, password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP_SSL(str(settings["host"]), int(settings["port"]), timeout=20) as smtp:
+                smtp.login(username, password)
+                smtp.send_message(message)
+    except Exception as exc:
+        _LOGGER.warning(
+            "test email failed error_type=%s smtp_code=%s",
+            type(exc).__name__,
+            smtp_exception_code(exc),
+        )
+        raise HTTPException(status_code=502, detail=smtp_error_message(exc)) from None
+    return {"status": "sent"}
+
+
+def _dashboard_settings_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "configs" / "default.yaml"
+
+
+@app.get("/api/dashboard-settings", dependencies=[Depends(require_token)])
+def dashboard_settings() -> dict[str, Any]:
+    from agent.config import get_config
+
+    config = get_config()
+    return {
+        "threshold": float(config.get("output", {}).get("threshold", 0.5)),
+        "max_file_bytes": int(config.get("forensics", {}).get("max_file_bytes", 50_000_000)),
+    }
+
+
+@app.put("/api/dashboard-settings", dependencies=[Depends(require_token)])
+def save_dashboard_settings(payload: DashboardSettingsRequest) -> dict[str, Any]:
+    import yaml
+
+    from agent import config as config_module
+
+    path = _dashboard_settings_path()
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config.setdefault("output", {})["threshold"] = payload.threshold
+    config.setdefault("forensics", {})["max_file_bytes"] = payload.max_file_bytes
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    config_module._config_cache = config
+    return {"threshold": payload.threshold, "max_file_bytes": payload.max_file_bytes}
+
+
+def _history_dir() -> Path:
+    path = Path.cwd() / "artifacts" / "history"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@app.get("/api/history", dependencies=[Depends(require_token)])
+def list_history() -> list[dict[str, Any]]:
+    from app.ui_settings import load_ui_settings
+
+    runs = []
+    for path in _history_dir().glob("*.json"):
+        try:
+            runs.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    limit = int(load_ui_settings()["history_keep"])
+    return sorted(runs, key=lambda run: run.get("created_at", ""), reverse=True)[:limit]
+
+
+@app.post("/api/history", dependencies=[Depends(require_token)])
+def save_history(payload: HistoryRequest) -> dict[str, str]:
+    from app.ui_settings import load_ui_settings
+
+    run_id = uuid.uuid4().hex
+    run = dict(payload.run)
+    run["id"] = run_id
+    target = _history_dir() / f"{run_id}.json"
+    target.write_text(json.dumps(run, ensure_ascii=True), encoding="utf-8")
+    keep = int(load_ui_settings()["history_keep"])
+    for old in sorted(
+        _history_dir().glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True
+    )[keep:]:
+        old.unlink(missing_ok=True)
+    return {"id": run_id}
+
+
+@app.get("/api/history/{run_id}", dependencies=[Depends(require_token)])
+def get_history(run_id: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[a-f0-9]{32}", run_id):
+        raise HTTPException(status_code=404, detail="Run not found.")
+    target = (_history_dir() / f"{run_id}.json").resolve()
+    try:
+        target.relative_to(_history_dir().resolve())
+        return json.loads(target.read_text(encoding="utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError):
+        raise HTTPException(status_code=404, detail="Run not found.") from None
+
+
+@app.post("/api/results/export", dependencies=[Depends(require_token)])
+def export_results_json(payload: ResultsExportRequest) -> dict[str, Any]:
+    """Return the current dashboard result set as downloadable JSON."""
+    return payload.model_dump()
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def dashboard() -> FileResponse:
     """Serve the standalone local dashboard."""
@@ -330,10 +539,32 @@ def chat(payload: ChatRequest) -> dict[str, Any]:
     if not image_path.is_file():
         raise HTTPException(status_code=404, detail="image_path does not exist")
 
+    if payload.require_llm:
+        from agent.agent_config import get_agent_config, model_entries
+        from agent.env import get_secret
+
+        names = sorted({item["api_key_env"] for item in model_entries(get_agent_config())})
+        if not any(get_secret(name) for name in names):
+            raise HTTPException(
+                status_code=503,
+                detail="Language model is not configured. Set one of: " + ", ".join(names),
+            )
+
     from app.chat_handler import agent_chat
 
+    context = {
+        key: payload.context.get(key)
+        for key in ("filename", "verdict", "tampered_score_uncalibrated", "region", "ela_available")
+        if key in payload.context
+    }
+    question = payload.message
+    if context:
+        question += (
+            "\n\nImage analysis context (data): "
+            + json.dumps(context, ensure_ascii=True, default=str)[:4000]
+        )
     result = agent_chat(
-        payload.message,
+        question,
         None,
         {
             "image_path": str(image_path),
@@ -352,6 +583,69 @@ def chat(payload: ChatRequest) -> dict[str, Any]:
             "filename": image_path.name,
         }
     return reply
+
+
+@app.post("/api/analyze-image", dependencies=[Depends(require_token)])
+def analyze_image(payload: AnalyzeImageRequest) -> dict[str, Any]:
+    """Run the deterministic evidence pipeline for one uploaded image."""
+    image_path = Path(payload.image_path).expanduser().resolve()
+    try:
+        image_path.relative_to(upload_root().resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="image_path is outside the upload directory"
+        ) from None
+    if not image_path.is_file():
+        raise HTTPException(status_code=404, detail="image_path does not exist")
+    from agent.orchestrator import run_investigation
+    from app.chat_handler import (
+        ELA_TOOL_NAME,
+        _ensure_ela_with_path,
+        _fixed_answer,
+        _record_tool_log,
+        _structured_reply,
+    )
+
+    goal = payload.goal if payload.goal in {"quick_check", "detailed", "custom"} else "quick_check"
+    record = run_investigation(
+        str(image_path),
+        goal=goal,
+        goal_text=payload.goal_text,
+        config={"threshold": payload.threshold},
+        planner=False,
+        detector=get_detector(),
+    )
+    generated_ela_path = None
+    if not any(observation.tool == ELA_TOOL_NAME for observation in record.observations):
+        _ela, generated_ela_path = _ensure_ela_with_path(image_path)
+    reply = _structured_reply(
+        record,
+        _fixed_answer(record),
+        _record_tool_log(record, source="analysis"),
+        "fixed_pipeline",
+        {},
+        generated_ela_path,
+    )
+    context = {
+        "filename": image_path.name,
+        "verdict": reply["verdict"],
+        "tampered_score_uncalibrated": reply["tampered_score_uncalibrated"],
+        "region": reply["region"],
+        "ela_available": bool(reply["ela_image_path"]),
+    }
+    reply["conversation_state"] = {
+        "history": [
+            {
+                "role": "user",
+                "content": "Analyze this image. Use the following recorded analysis as context: "
+                + json.dumps(context, ensure_ascii=True),
+            },
+            {"role": "assistant", "content": reply["answer_text"]},
+        ],
+        "image_path": str(image_path),
+        "filename": image_path.name,
+    }
+    return {key: value for key, value in reply.items() if not key.startswith("_")}
 
 
 @app.post("/api/upload", dependencies=[Depends(require_token)])
@@ -562,8 +856,7 @@ def asset(path: str = Query(min_length=1)) -> FileResponse:
                 configured = [configured]
             roots.extend(Path(item).expanduser().resolve() for item in configured)
         roots.extend(
-            (Path.cwd() / "artifacts" / folder).resolve()
-            for folder in ("batch", "reports")
+            (Path.cwd() / "artifacts" / folder).resolve() for folder in ("batch", "reports")
         )
     except Exception:
         pass
@@ -587,10 +880,31 @@ def analyze_batch(payload: BatchRequest) -> dict[str, Any]:
     from agent.batch import process_batch
 
     result = process_batch(str(archive), "artifacts/batch", detector=get_detector())
-    safe_results = [
-        {key: value for key, value in item.items() if key != "record"}
-        for item in result["results"]
-    ]
+    safe_results = []
+    for item in result["results"]:
+        safe = {key: value for key, value in item.items() if key != "record"}
+        record = item.get("record")
+        if record:
+            localizer = next(
+                (
+                    observation.result or {}
+                    for observation in record.observations
+                    if observation.tool == "run_localizer"
+                ),
+                {},
+            )
+            safe["bbox"] = localizer.get("bbox")
+            safe["image_size"] = localizer.get("image_size")
+            safe["image_path"] = record.image_path
+            safe["ela_image_path"] = next(
+                (
+                    (observation.result or {}).get("artifact")
+                    for observation in record.observations
+                    if observation.tool == "generate_ela"
+                ),
+                None,
+            )
+        safe_results.append(safe)
     return {**result, "results": safe_results}
 
 
@@ -631,6 +945,35 @@ def export_report(payload: ReportRequest) -> dict[str, str]:
     else:
         generate_batch_pdf(records, report_path)
     return {"report_path": str(report_path.resolve())}
+
+
+@app.post(
+    "/reports/{report_id}/email",
+    dependencies=[Depends(require_token)],
+    response_model=EmailReportResponse,
+)
+def email_report(report_id: str, payload: EmailReportRequest) -> EmailReportResponse:
+    """Email a previously generated PDF report."""
+    report_dir = (Path.cwd() / "artifacts" / "reports").resolve()
+    if not re.fullmatch(r"deepfake-localizer-[a-f0-9]{32}", report_id):
+        raise HTTPException(status_code=404, detail="Report not found.")
+    report_path = (report_dir / f"{report_id}.pdf").resolve()
+    if not report_path.is_relative_to(report_dir) or not report_path.is_file():
+        raise HTTPException(status_code=404, detail="Report not found.")
+    from agent.email_report import EmailNotConfigured, send_report_email
+
+    body = payload.message or "Your requested forensic report is attached."
+    try:
+        send_report_email(payload.to, f"Deepfake Localizer report {report_id}", body, report_path)
+    except EmailNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception as exc:
+        from agent.email_report import smtp_error_message
+
+        raise HTTPException(status_code=502, detail=smtp_error_message(exc)) from None
+    return EmailReportResponse(status="sent", recipients=len(payload.to))
 
 
 def _run_and_log(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:

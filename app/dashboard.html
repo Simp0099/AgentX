@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 44'%3E%3Cpath fill='%232868e7' d='M20 2 36 8v12c0 10-6.7 17.2-16 22C10.7 37.2 4 30 4 20V8z'/%3E%3Cpath fill='none' stroke='white' stroke-width='3' d='m12 21 5 5 11-12'/%3E%3C/svg%3E">
   <title>Deepfake Localizer</title>
   <style>
-    html { font-size: clamp(0.875rem, 0.9vw + 0.625rem, 1rem); }
+    html { font-size: 14px; }
     :root {
       color-scheme: light;
       --page: #e7edf8;
@@ -97,8 +97,10 @@
     button { color: inherit; }
     :focus-visible { outline: 0.1875rem solid var(--blue); outline-offset: 0.125rem; }
     ::placeholder { color: var(--muted); opacity: 1; }
-    .app-shell { width: 100%; max-width: 75rem; min-height: 100vh; margin: 0 auto; padding: 1rem; }
+    .app-shell { width: 100%; max-width: 1200px; min-height: 100vh; margin: 0 auto; padding: 1rem; }
     .topbar {
+      max-width: 1200px;
+      margin-inline: auto;
       height: 3.875rem;
       display: grid;
       grid-template-columns: minmax(16.875rem, 1fr) auto minmax(7.5rem, 1fr);
@@ -129,7 +131,7 @@
     .icon-button svg { width: 1.25rem; height: 1.25rem; }
     .layout { display: block; margin-top: 1rem; min-height: calc(100vh - 6.75rem); }
     .online-dot, .ready-dot { width: 0.5625rem; height: 0.5625rem; display: inline-block; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0.1875rem var(--green-bg); }
-    .main-grid { display: grid; grid-template-columns: minmax(21.875rem, 34%) minmax(0, 1fr); align-items: start; gap: 1.25rem; min-width: 0; }
+    .main-grid { display: grid; grid-template-columns: minmax(250px, 30%) minmax(0, 1fr); align-items: start; gap: 1rem; min-width: 0; }
     .left-column, .right-column { min-width: 0; }
     .page-heading { margin: 1.0625rem 0 0.9375rem; }
     .page-heading h1 { margin: 0; font-size: clamp(1.375rem, 2vw, 1.75rem); line-height: 1.15; letter-spacing: -.04em; }
@@ -138,7 +140,7 @@
     .upload-panel { padding: 1.0625rem; }
     .panel-title { display: flex; align-items: center; gap: 0.625rem; margin: 0 0 0.8125rem; font-size: 0.9375rem; font-weight: 700; }
     .panel-title svg { width: 1.25rem; height: 1.25rem; color: var(--blue); }
-    .drop-zone { min-height: 8.25rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; padding: 1rem; border: 0.0625rem dashed var(--line-strong); border-radius: 0.9375rem; background: var(--panel-raised); text-align: center; cursor: pointer; transition: border-color .16s, background .16s, transform .16s; }
+    .drop-zone { min-height: 160px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; padding: 1rem; border: 0.0625rem dashed var(--line-strong); border-radius: 0.9375rem; background: var(--panel-raised); text-align: center; cursor: pointer; transition: border-color .16s, background .16s, transform .16s; }
     .drop-zone:hover, .drop-zone.dragging { border-color: var(--blue); background: var(--blue-soft); transform: translateY(-0.0625rem); }
     .drop-zone svg { width: 2.3125rem; height: 2.3125rem; color: var(--blue); margin-bottom: 0.125rem; }
     .drop-main { font-weight: 660; }
@@ -181,6 +183,32 @@
     .analyze-button { width: 100%; margin-top: 0.9375rem; border-radius: 62.4375rem; }
     .small-icon { width: 1.0625rem; height: 1.0625rem; }
     .right-column { padding-top: 1.6875rem; }
+    .results-and-sidebar { display:grid; grid-template-columns:minmax(0,1fr) minmax(320px,380px); gap:12px; min-width:0; }
+    .results-content,.run-sidebar { min-width:0; }
+    .run-sidebar { width:min(100%,380px); display:grid; align-content:start; gap:8px; }
+    .sidebar-panel { min-width:0; max-width:100%; padding:12px; }
+    .sidebar-panel .panel-title { margin-bottom:8px; font-size:14px; }
+    .sidebar-list { display:grid; gap:5px; margin:0; padding:0; list-style:none; }
+    .history-button { width:100%; display:block; min-height:2.25rem; padding:7px; border:0; color:var(--blue); background:transparent; text-align:left; text-decoration:underline; cursor:pointer; }
+    .sidebar-small { color:var(--muted); font-size:12px; }
+    .sidebar-buttons { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+    .sidebar-buttons button { justify-content:center; }
+    .data-table-wrap { width:100%; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; }
+    .data-table { width:100%; min-width:100%; border-collapse:collapse; table-layout:auto; font-size:12px; line-height:1.3; }
+    .data-table th, .data-table td { padding:9px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; white-space:normal; overflow-wrap:anywhere; }
+    .data-table th { color:var(--muted); font-weight:750; }
+    .data-table tbody tr:last-child td { border-bottom:0; }
+    .history-table { min-width:330px; }
+    .history-table th:first-child, .history-table td:first-child { max-width:150px; }
+    .history-file { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .link-button { justify-self:start; min-height:2rem; padding:3px 0; border:0; background:none; color:var(--blue); text-decoration:underline; font:inherit; font-size:12px; cursor:pointer; }
+    .email-error { display:flex; gap:8px; width:100%; max-width:100%; min-height:38px; margin-top:7px; padding:8px; border:1px solid var(--red); border-radius:8px; color:var(--red); line-height:1.3; white-space:normal; overflow-wrap:anywhere; }
+    .email-error[hidden] { display:none; }
+    .email-inline { display:grid; gap:7px; margin-top:8px; min-width:0; }
+    .recipient-chips { display:flex; flex-wrap:wrap; gap:4px; }
+    .recipient-chip { display:inline-flex; align-items:center; gap:5px; padding:3px 7px; border:1px solid var(--line); border-radius:999px; background:var(--panel-raised); font-size:11px; }
+    .sidebar-panel .control { min-height:36px; padding:6px 8px; font-size:12px; }
+    .status-warning { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.3; white-space:normal; overflow-wrap:anywhere; }
     .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.625rem; padding: 0.4375rem; }
     .stat-card { min-height: 4.875rem; display: flex; align-items: center; gap: 0.8125rem; padding: 0.75rem 0.9375rem; border: 0.0625rem solid var(--line); border-radius: 0.9375rem; background: var(--panel-raised); }
     .stat-icon { width: 2.6875rem; height: 2.6875rem; display: grid; place-items: center; flex: 0 0 auto; border: 0.0625rem solid var(--line); border-radius: 50%; color: var(--blue); background: var(--panel-solid); box-shadow: var(--shadow-soft); }
@@ -254,16 +282,31 @@
     .batch-result, .report-row { display: flex; justify-content: space-between; gap: 0.625rem; padding: 0.5625rem 0.625rem; border: 0.0625rem solid var(--line); border-radius: 0.625rem; background: var(--panel-raised); font-size: 0.6875rem; }
     .batch-result .status { color: var(--green); }
     .notice { min-height: 1.0625rem; margin-top: 0.4375rem; color: var(--muted); font-size: 0.6875rem; }
+    .email-form { display: grid; gap: .625rem; width: 100%; margin-top: .625rem; }
+    .email-form .field-label { display: grid; gap: .35rem; margin: 0; }
+    .email-form .control { width: 100%; min-width: 0; }
+    button, input, select, textarea, .panel-title, .field-label { min-height: 1.5rem; line-height: 1.3; white-space: normal; }
+    button { min-width: 120px; }
+    .top-tab { min-width: 0; }
+    .icon-button, .send-button, .remove-file, .remove-recipient { min-width: 0; white-space: nowrap; }
+    .data-table button { min-width: 0; }
+    .read-results { margin-top:.75rem; padding:.75rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); }
+    .read-results summary { min-height:1.75rem; line-height:1.3; font-weight:700; cursor:pointer; }
+    .read-results ul { margin:.5rem 0 0; padding-left:1.25rem; }
+    .read-results li { padding:.125rem 0; line-height:1.3; }
     .error-text { color: var(--red); }
     .hidden { display: none !important; }
     blockquote { margin: 0.625rem 0; padding: 0.5rem 0.625rem; border-left: 0.1875rem solid var(--blue); border-radius: 0 0.5rem 0.5rem 0; color: var(--muted); background: var(--panel-raised); font-size: 0.625rem; }
     @media (min-width: 48rem) {
-      .main-grid { grid-template-columns: minmax(19rem, 34%) minmax(0, 1fr); gap: 1.25rem; }
+      .main-grid { grid-template-columns: minmax(240px, 30%) minmax(0, 1fr); gap: 1rem; }
     }
     @media (min-width: 80rem) {
       .main-grid { grid-template-columns: minmax(22rem, 34%) minmax(0, 1fr); }
     }
-    @media (max-width: 63.999rem) {
+    @media (max-width: 1023px) {
+      .results-and-sidebar { grid-template-columns: 1fr; }
+      .run-sidebar.collapsed .sidebar-body { display:none; }
+      .sidebar-toggle { display:inline-flex !important; }
       .topbar { grid-template-columns: minmax(0, 1fr) auto; height: auto; min-height: 3.75rem; padding: .5rem .75rem; }
       .top-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
       .top-actions { grid-column: 2; grid-row: 1; }
@@ -274,6 +317,7 @@
       .top-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: stretch; justify-content: center; }
       .top-actions { grid-column: 2; grid-row: 1; }
       .main-grid { grid-template-columns: 1fr; }
+      .results-and-sidebar { grid-template-columns: 1fr; }
       .main-grid, .evidence-grid { flex-direction: column; }
       .right-column { padding-top: 0; }
       .page-heading { margin-top: .25rem; }
@@ -291,6 +335,7 @@
       .stat-card { min-height: 4.1875rem; gap: .4375rem; padding: .5rem; }
       .stat-icon { width: 2rem; height: 2rem; }
       .stat-icon svg { width: 1.0625rem; height: 1.0625rem; }
+      html { font-size: 20px; }
       .stat-value { font-size: 1.1875rem; }
       .stat-label { font-size: .5625rem; }
       .actions-row { flex-wrap: wrap; }
@@ -347,12 +392,15 @@
               <label class="field"><span class="field-label">Investigation goal</span><select class="control" id="goal"><option value="quick_check">Quick check</option><option value="detailed">Detailed</option><option value="custom">Custom question</option></select></label>
               <label class="field"><span class="field-label">Custom question (optional)</span><textarea class="control" id="custom-question" maxlength="250" placeholder="e.g. What is the main change in this image?"></textarea><span class="char-count"><span id="char-count">0</span>/250</span></label>
               <div class="field"><div class="threshold-row"><div><div class="field-label">Decision threshold</div><div class="threshold-note">Lower catches more tampering but raises false alarms.</div></div><input id="threshold-number" class="threshold-number" type="number" min="0.10" max="0.90" step="0.01" value="0.50" aria-label="Decision threshold value"></div><div class="range-row"><span>0.10</span><input id="threshold" type="range" min="0.10" max="0.90" step="0.01" value="0.50" aria-label="Decision threshold"><span>0.90</span></div></div>
+              <label class="field"><span class="field-label">Maximum image size (MB)</span><input id="max-file-mb" class="control" type="number" min="1" max="500" step="1" value="50"></label>
+              <button class="secondary-button" id="save-analysis-settings" type="button">Save analysis settings</button>
               <div class="notice" id="settings-status" aria-live="polite"></div>
             </section>
           </div>
         </section>
 
         <section class="right-column" aria-label="Analysis results">
+          <div class="results-and-sidebar"><div class="results-content">
           <section class="panel stats" aria-label="Analysis summary">
             <div class="stat-card"><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg></span><div><div class="stat-value" id="stat-files">0</div><div class="stat-label">Files analysed</div></div></div>
             <div class="stat-card flagged"><span class="stat-icon warning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><div><div class="stat-value" id="stat-flagged">0</div><div class="stat-label">Flagged for review</div></div></div>
@@ -360,8 +408,15 @@
           </section>
           <section class="results-grid" id="results-grid" aria-live="polite"><div class="panel empty-state" id="empty-results"><div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg><div>Analysis results appear here after you analyze media.</div></div></div></section>
           <section class="panel evidence-panel"><h2 class="panel-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 15-5-5L5 20"/></svg>ELA evidence</h2><div class="evidence-grid" id="evidence-grid"><div class="empty-state" id="empty-ela">ELA evidence will appear for completed checks.</div></div></section>
-          <section class="panel ask-panel"><h2 class="panel-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-9 8.5 9 9 0 0 1-4-.9L3 21l1.8-4.3A8 8 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>Ask about this image</h2><div class="ask-row"><textarea id="chat-question" class="control" rows="2" maxlength="1000" placeholder="e.g. Where might the image have been edited?" aria-label="Ask about this image"></textarea><button id="chat-send" class="send-button" type="button" aria-label="Send question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13"/></svg></button></div><div class="chat-response" id="chat-response" aria-live="polite"></div><div class="actions-row"><button class="secondary-button" id="export-pdf" type="button"><svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5m-9 4h5m-5 4h5"/></svg>Export PDF report</button><button class="secondary-button primary" id="download-results" type="button"><svg class="small-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 17v4h16v-4"/></svg>Download results</button></div></section>
-          <section class="panel batch-panel" id="batch-panel"><h2 class="panel-title">Batch analysis</h2><p class="threshold-note">Upload a ZIP archive to run the existing bounded batch pipeline.</p><div class="batch-results" id="batch-results"></div><a class="secondary-button hidden" id="batch-pdf-link" target="_blank" rel="noopener">Download batch PDF</a></section>
+          <section class="panel ask-panel"><h2 class="panel-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.5 8.5 0 0 1-9 8.5 9 9 0 0 1-4-.9L3 21l1.8-4.3A8 8 0 0 1 3 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>Ask about this image</h2><div class="ask-row"><textarea id="chat-question" class="control" rows="2" maxlength="1000" placeholder="e.g. Where might the image have been edited?" aria-label="Ask about this image"></textarea><button id="chat-send" class="send-button" type="button" aria-label="Send question"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4 20-7ZM22 2 11 13"/></svg></button></div><div class="chat-response" id="chat-response" aria-live="polite"></div></section>
+          <details class="read-results"><summary>How to read results</summary><ul><li>Flagged means review, not proof.</li><li>Scores are uncalibrated signals, not probabilities.</li><li>Check the evidence and context before drawing conclusions.</li></ul></details>
+          </div><aside class="run-sidebar" id="run-sidebar" aria-label="Run tools and status"><div class="sidebar-heading"><h2 class="panel-title">Run tools</h2><button class="secondary-button sidebar-toggle" id="sidebar-toggle" type="button" style="display:none">Show / hide</button></div><div class="sidebar-body">
+            <section class="panel sidebar-panel"><h3 class="panel-title">Run summary</h3><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody id="run-summary"><tr><td>Files analysed</td><td>0</td></tr><tr><td>Flagged</td><td>0</td></tr><tr><td>Errors</td><td>0</td></tr><tr><td>Processing time</td><td>0.00 s</td></tr><tr><td>Threshold used</td><td>0.50</td></tr></tbody></table></div></section>
+            <section class="panel sidebar-panel"><h3 class="panel-title">Recent runs</h3><div class="data-table-wrap"><table class="data-table history-table"><thead><tr><th>File</th><th>Verdict</th><th>Score</th><th>Time</th></tr></thead><tbody id="recent-runs"><tr><td colspan="4" class="sidebar-small">No saved runs yet.</td></tr></tbody></table></div></section>
+            <section class="panel sidebar-panel" id="report-actions-card"><h3 class="panel-title">Report actions</h3><div class="sidebar-buttons"><button class="secondary-button" id="export-pdf" type="button">Export PDF</button><button class="secondary-button" id="download-results" type="button">Download JSON</button></div><div class="email-inline"><div class="recipient-chips" id="recipient-chips"></div><div class="sidebar-buttons"><input class="control" id="side-email-recipient" type="email" aria-label="Recipient email" placeholder="Recipient email"><button class="secondary-button" id="side-add-recipient" type="button">Add</button></div><label class="field-label" for="side-email-note">Optional note</label><textarea class="control" id="side-email-note" rows="2" maxlength="500" placeholder="Add a short note"></textarea><button class="secondary-button primary" id="side-email-send" type="button">Send report</button><button class="link-button" id="side-test-email" type="button">Send test email</button><div id="side-email-status" class="sidebar-small" aria-live="polite"></div><div id="side-email-error" class="email-error" role="alert" hidden><span aria-hidden="true">⚠</span><span id="side-email-error-text"></span></div></div></section>
+            <section class="panel sidebar-panel"><h3 class="panel-title">Model status</h3><div class="data-table-wrap"><table class="data-table"><thead><tr><th>Provider</th><th>Key variable</th><th>Status</th><th>Model</th></tr></thead><tbody id="model-status"><tr><td colspan="4">Checking configuration…</td></tr></tbody></table></div><div id="last-run-model" class="sidebar-small"></div><div id="smtp-status" class="status-warning"></div></section>
+          </div></aside></div>
+          <section class="panel batch-panel" id="batch-panel"><h2 class="panel-title">Batch analysis</h2><p class="threshold-note">Upload a ZIP archive to run the existing bounded batch pipeline.</p><div class="batch-results" id="batch-results"></div><div class="data-table-wrap"><table class="data-table batch-table"><thead><tr><th>File</th><th>Status</th><th>Verdict</th><th>Score</th><th>Region (H px, V px)</th><th>Coverage %</th></tr></thead><tbody id="batch-results-table"><tr><td colspan="6">Batch results appear here after analysis.</td></tr></tbody></table></div><a class="secondary-button hidden" id="batch-pdf-link" target="_blank" rel="noopener">Download batch PDF</a></section>
           <section class="panel reports-panel" id="reports-panel"><h2 class="panel-title">Reports</h2><div class="report-list" id="report-list"><div class="notice">Reports appear here after analysis.</div></div></section>
         </section>
       </main>
@@ -371,7 +426,7 @@
     (() => {
       "use strict";
       const $ = (selector, root = document) => root.querySelector(selector);
-      const defaultSettings = { goal: "quick_check", customQuestion: "", threshold: 0.5 };
+      const defaultSettings = { goal: "quick_check", customQuestion: "", threshold: 0.5, maxFileMb: 50 };
       function storageRead(key) { try { return localStorage.getItem(key); } catch { return null; } }
       function storageWrite(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } }
       function loadSettings() {
@@ -381,10 +436,11 @@
             goal: ["quick_check", "detailed", "custom"].includes(saved.goal) ? saved.goal : defaultSettings.goal,
             customQuestion: typeof saved.customQuestion === "string" ? saved.customQuestion.slice(0, 250) : "",
             threshold: Number.isFinite(Number(saved.threshold)) ? Math.max(.1, Math.min(.9, Number(saved.threshold))) : defaultSettings.threshold,
+            maxFileMb: Number.isFinite(Number(saved.maxFileMb)) ? Math.max(1, Math.min(500, Number(saved.maxFileMb))) : defaultSettings.maxFileMb,
           };
         } catch { return { ...defaultSettings }; }
       }
-      const state = { files: [], results: [], batch: null, active: null, settingsOpen: false, settings: loadSettings() };
+      const state = { files: [], results: [], batch: null, errors: [], reportId: null, active: null, settingsOpen: false, settings: loadSettings(), history: [], runStarted: 0, runSeconds: 0, runThreshold: null, historyId: null };
       const storedTheme = storageRead("deepfake-localizer.theme");
       const initialTheme = storedTheme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
       document.documentElement.dataset.theme = initialTheme;
@@ -398,7 +454,15 @@
       const formatSize = (bytes) => bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
       const escapeHTML = (value) => safeText(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
       async function apiJSON(url, options = {}) {
-        const response = await fetch(url, { ...options, headers: apiHeaders(options.headers || {}) });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120000);
+        let response;
+        try {
+          response = await fetch(url, { ...options, signal: controller.signal, headers: apiHeaders(options.headers || {}) });
+        } catch (error) {
+          if (error.name === "AbortError") throw new Error("Request timed out after 120 seconds.");
+          throw error;
+        } finally { clearTimeout(timer); }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const detail = typeof data.detail === "string" ? data.detail : data.detail?.message || data.error;
@@ -408,7 +472,7 @@
         return data;
       }
       async function loadAsset(path) {
-        const response = await fetch(`/api/assets?${new URLSearchParams({ path })}`, { headers: apiHeaders() });
+        const response = await fetch(`/api/assets?${new URLSearchParams({ path })}`, { headers: apiHeaders(), signal: AbortSignal.timeout(30000) });
         if (!response.ok) return null;
         return URL.createObjectURL(await response.blob());
       }
@@ -467,7 +531,9 @@
       async function upload(entry) {
         if (entry.uploadData) return entry.uploadData;
         const query = new URLSearchParams({ filename: entry.file.name });
-        const response = await fetch(`/api/upload?${query}`, { method: "POST", body: entry.file, headers: apiHeaders({ "Content-Type": "application/octet-stream" }) });
+        let response;
+        try { response = await fetch(`/api/upload?${query}`, { method: "POST", body: entry.file, headers: apiHeaders({ "Content-Type": "application/octet-stream" }), signal: AbortSignal.timeout(120000) }); }
+        catch (error) { if (error.name === "TimeoutError" || error.name === "AbortError") throw new Error("Upload timed out after 120 seconds."); throw error; }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
           const detail = typeof data.detail === "string" ? data.detail : data.detail?.message || `Upload failed (${response.status})`;
@@ -514,27 +580,75 @@
             const score = formatScore(data.tampered_score_uncalibrated);
             const checks = (data.tool_log || []).map((check) => { const failed = check.status === "error" || check.status === "timeout"; const mark = check.status === "ok" ? "✓" : failed ? "!" : "·"; return `<li class="check-item"><span class="check-mark ${failed ? "failed" : ""}">${mark}</span>${escapeHTML(checkNames[check.tool] || check.tool)}</li>`; }).join("") || `<li class="check-item">No checks returned</li>`;
             const annotationLabel = data.region ? "Annotated (tampered region)" : "Annotated (no region localized)";
-            return `<article class="panel result-card" data-result="${index}" tabindex="0" aria-label="Select ${escapeHTML(item.filename)} for follow-up questions"><h3 class="result-title">${index + 1}. ${escapeHTML(item.filename)}${state.active === item ? " · Selected" : ""}</h3><div class="image-pair"><div><div class="image-frame"><img src="${item.objectURL}" alt="Original image: ${escapeHTML(item.filename)}"></div><div class="image-label">Original</div></div><div><div class="image-frame"><canvas id="annotated-${index}" aria-label="Annotated image showing tampered region when available"></canvas></div><div class="image-label">${annotationLabel}</div></div></div><div class="findings"><div class="finding-main"><div class="finding-heading">Findings</div><span class="badge ${flagged ? "flagged" : authentic ? "authentic" : "neutral"}">${escapeHTML(verdict)}</span><div class="score-label">Tampered score (uncalibrated)</div><div class="score-value">${score}</div></div><div class="checks"><div class="checks-title">Checks completed</div><ul class="check-list">${checks}</ul></div></div></article>`;
+            const originalPreview = item.objectURL ? `<img src="${item.objectURL}" alt="Original image: ${escapeHTML(item.filename)}">` : `<div class="empty-state">Image source is no longer available.</div>`;
+            return `<article class="panel result-card" data-result="${index}" tabindex="0" aria-label="Select ${escapeHTML(item.filename)} for follow-up questions"><h3 class="result-title">${index + 1}. ${escapeHTML(item.filename)}${state.active === item ? " · Selected" : ""}</h3><div class="image-pair"><div><div class="image-frame">${originalPreview}</div><div class="image-label">Original</div></div><div><div class="image-frame"><canvas id="annotated-${index}" aria-label="Annotated image showing tampered region when available"></canvas></div><div class="image-label">${annotationLabel}</div></div></div><div class="findings"><div class="finding-main"><div class="finding-heading">Findings</div><span class="badge ${flagged ? "flagged" : authentic ? "authentic" : "neutral"}">${escapeHTML(verdict)}</span><div class="score-label">Tampered score (uncalibrated)</div><div class="score-value">${score}</div></div><div class="checks"><div class="checks-title">Checks completed</div><ul class="check-list">${checks}</ul></div></div></article>`;
           }).join("");
-          state.results.forEach((item, index) => drawAnnotated($(`#annotated-${index}`), item.objectURL, item.data.region));
+          state.results.forEach((item, index) => { if (item.objectURL) drawAnnotated($(`#annotated-${index}`), item.objectURL, item.data.region); });
         }
-        const flaggedCount = state.results.filter((item) => verdictLabel(item.data).toLowerCase().startsWith("flagged")).length;
-        const errors = state.results.reduce((count, item) => count + (item.data.tool_log || []).filter((tool) => tool.status === "error" || tool.status === "timeout").length, 0);
-        $("#stat-files").textContent = String(state.results.length);
-        $("#stat-flagged").textContent = String(flaggedCount);
-        $("#stat-errors").textContent = String(errors);
+        renderStats();
         renderEvidence();
         renderReports();
       }
+      function renderStats() {
+        const batchItems = state.batch?.results || [];
+        const flaggedCount = state.results.filter((item) => verdictLabel(item.data).toLowerCase().startsWith("flagged")).length
+          + batchItems.filter((item) => String(item.verdict || "").toLowerCase().startsWith("flagged")).length;
+        const toolErrors = state.results.reduce((count, item) => count + (item.data.tool_log || []).filter((tool) => ["error", "timeout"].includes(tool.status)).length, 0);
+        $("#stat-files").textContent = String(state.results.length + batchItems.filter((item) => item.status !== "Skipped").length);
+        $("#stat-flagged").textContent = String(flaggedCount);
+        $("#stat-errors").textContent = String(state.errors.length + toolErrors);
+        renderRunSummary();
+      }
+      function renderRunSummary() {
+        const batchItems = state.batch?.results || [];
+        const files = state.results.length + batchItems.filter((item) => item.status !== "Skipped").length;
+        const flagged = state.results.filter((item) => verdictLabel(item.data).toLowerCase().startsWith("flagged")).length + batchItems.filter((item) => String(item.verdict || "").toLowerCase().startsWith("flagged")).length;
+        const errors = state.errors.length + state.results.reduce((count, item) => count + (item.data.tool_log || []).filter((tool) => ["error", "timeout"].includes(tool.status)).length, 0);
+        const threshold = state.runThreshold ?? state.settings.threshold;
+        $("#run-summary").innerHTML = `<tr><td>Files analysed</td><td>${files}</td></tr><tr><td>Flagged</td><td>${flagged}</td></tr><tr><td>Errors</td><td>${errors}</td></tr><tr><td>Processing time</td><td>${state.runSeconds.toFixed(2)} s</td></tr><tr><td>Threshold used</td><td>${threshold.toFixed(2)}</td></tr>`;
+        const model = state.results.at(-1)?.data?.model_version || state.results.at(-1)?.data?.model || "Deterministic fixed pipeline";
+        $("#last-run-model").textContent = `Last run model: ${model}`;
+      }
+      async function refreshRecentRuns() {
+        try {
+          state.history = await apiJSON("/api/history");
+          const list = $("#recent-runs");
+          list.innerHTML = state.history.length ? state.history.map((run) => { const first = run.files?.[0] || run.batch?.results?.[0] || {}; const filename = first.filename || "Analysis run"; const verdict = first.data?.verdict || first.verdict || run.verdict || "Mixed"; const score = first.data?.tampered_score_uncalibrated ?? first.tampered_prob ?? run.score; const time = run.created_at ? new Date(run.created_at).toLocaleString() : "Time unavailable"; return `<tr><td><button class="history-button history-file" data-history="${escapeHTML(run.id)}" title="${escapeHTML(filename)}">${escapeHTML(filename)}</button></td><td>${escapeHTML(verdict)}</td><td>${escapeHTML(formatScore(score))}</td><td>${escapeHTML(time)}</td></tr>`; }).join("") : `<tr><td colspan="4" class="sidebar-small">No saved runs yet.</td></tr>`;
+        } catch (error) { $("#recent-runs").innerHTML = `<tr><td colspan="4" class="sidebar-small">History unavailable: ${escapeHTML(error.message)}</td></tr>`; }
+      }
+      async function saveRunHistory() {
+        if (!state.results.length && !state.batch) return;
+        const files = state.results.map((item) => ({ filename: item.filename, path: item.path, data: item.data, threshold: item.threshold }));
+        const batchFirst = state.batch?.results?.[0] || {};
+        const run = { created_at: new Date().toISOString(), files, batch: state.batch, errors: state.errors, seconds: state.runSeconds, threshold: state.runThreshold ?? state.settings.threshold, verdict: files[0]?.data?.verdict || batchFirst.verdict || state.batch?.status || "Inconclusive", score: files[0]?.data?.tampered_score_uncalibrated ?? batchFirst.tampered_prob ?? null };
+        try { state.historyId = (await apiJSON("/api/history", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({run}) })).id; await refreshRecentRuns(); }
+        catch (error) { setNotice(`Could not save run history: ${error.message}`, true); }
+      }
+      async function loadHistory(id) {
+        try {
+          const run = await apiJSON(`/api/history/${encodeURIComponent(id)}`);
+          state.results = [];
+          for (const saved of run.files || []) {
+            const objectURL = saved.path ? await loadAsset(saved.path) : null;
+            const data = saved.data || { verdict:saved.verdict || "Inconclusive", tampered_score_uncalibrated:saved.score, tool_log:[] };
+            state.results.push({ filename:saved.filename || "Analysis run", path:saved.path || null, objectURL, data, threshold:saved.threshold ?? run.threshold, history:[], chatTurns:[] });
+          }
+          state.batch = run.batch || null; state.errors = run.errors || []; state.runSeconds = run.seconds || 0; state.runThreshold = run.threshold ?? null; state.settings.threshold = run.threshold ?? state.settings.threshold; state.historyId = id; state.reportId = null;
+          state.active = state.results.at(-1) || null; renderResults(); renderChatThread(state.active || {chatTurns:[]}); renderBatch(state.batch); renderStats();
+        } catch (error) { setNotice(`Could not load saved run: ${error.message}`, true); }
+      }
       async function renderEvidence() {
         const grid = $("#evidence-grid");
-        const withEla = state.results.filter((item) => item.data.ela_image_path);
+        const withEla = [
+          ...state.results.map((item) => ({ filename: item.filename, data: item.data, owner: item })),
+          ...(state.batch?.results || []).filter((item) => item.ela_image_path).map((item) => ({ filename: item.filename, data: { ela_image_path: item.ela_image_path }, owner: item })),
+        ].filter((item) => item.data.ela_image_path);
         if (!withEla.length) { grid.innerHTML = `<div class="empty-state">ELA evidence will appear for completed checks.</div>`; return; }
         grid.innerHTML = withEla.map((item, index) => `<div class="evidence-item"><div class="evidence-image-wrap"><img alt="ELA evidence for ${escapeHTML(item.filename)}" data-ela-index="${index}"></div><div class="evidence-caption">${escapeHTML(item.filename)}</div></div>`).join("");
         for (const [index, item] of withEla.entries()) {
-          if (item.elaURL) { $(`[data-ela-index="${index}"]`).src = item.elaURL; continue; }
+          if (item.owner.elaURL) { $(`[data-ela-index="${index}"]`).src = item.owner.elaURL; continue; }
           const url = await loadAsset(item.data.ela_image_path);
-          if (url) { item.elaURL = url; $(`[data-ela-index="${index}"]`).src = url; }
+          if (url) { item.owner.elaURL = url; $(`[data-ela-index="${index}"]`).src = url; }
         }
       }
       function renderReports() {
@@ -568,48 +682,117 @@
       }
       async function analyzeMedia() {
         if (!state.files.length) { setNotice("Choose an image or ZIP archive first.", true); return; }
-        const button = $("#analyze-button"); button.disabled = true;
-        const goal = state.settings.goal;
-        const custom = state.settings.customQuestion.trim();
-        const message = goal === "custom" && custom ? custom : `Please perform a ${goal === "detailed" ? "detailed" : "quick check"} of this image.`;
-        const threshold = state.settings.threshold;
+        const button = $("#analyze-button");
+        state.runStarted = performance.now();
+        state.runThreshold = state.settings.threshold;
+        button.disabled = true;
+        state.errors = [];
+        state.batch = null;
+        renderStats();
         const failures = [];
+        const threshold = state.settings.threshold;
         try {
           for (const entry of state.files) {
-            entry.status = "Analyzing"; renderFiles();
+            entry.status = "Analyzing";
+            renderFiles();
             try {
               const uploaded = await upload(entry);
+              if (entry.file.name.toLowerCase().endsWith(".zip")) {
+                const result = await apiJSON("/api/batch", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ zip_path: uploaded.image_path }),
+                });
+                state.batch = result;
+                state.batch.image_paths = (uploaded.images || []).map((image) => image.image_path).filter(Boolean);
+                for (const warning of uploaded.warnings || []) {
+                  failures.push(`${warning.filename}: ${warning.warning}`);
+                }
+                for (const row of result.results || []) {
+                  if (row.status === "Skipped" || row.status === "Failed") {
+                    failures.push(`${row.filename}: ${row.reason || row.error || row.status}`);
+                  }
+                }
+                if (result.error) failures.push(result.error);
+                entry.status = result.status || "Processed";
+                renderBatch(result);
+                continue;
+              }
               const images = uploaded.images || [{ filename: uploaded.filename, image_path: uploaded.image_path }];
-              const warnings = uploaded.warnings || [];
               for (const image of images) {
-                const objectURL = entry.objectURL && images.length === 1 ? entry.objectURL : await loadAsset(image.image_path);
-                const data = await apiJSON("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, image_path: image.image_path, history: [], threshold }) });
-                const item = { filename: image.filename, objectURL, path: image.image_path, data, history: data.conversation_state?.history || [{ role: "user", content: message }, { role: "assistant", content: data.answer_text || "" }], threshold, chatTurns: [{ question: message, reply: data }] };
+                const objectURL = entry.objectURL || await loadAsset(image.image_path);
+                const data = await apiJSON("/api/analyze-image", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    goal: state.settings.goal,
+                    goal_text: state.settings.customQuestion,
+                    image_path: image.image_path,
+                    threshold,
+                  }),
+                });
+                const item = {
+                  filename: image.filename,
+                  objectURL,
+                  path: image.image_path,
+                  data,
+                  history: data.conversation_state?.history || [],
+                  threshold,
+                  chatTurns: [],
+                };
                 const previous = state.results.findIndex((existing) => existing.path === item.path);
-                if (previous >= 0) state.results.splice(previous, 1, item); else state.results.push(item);
+                if (previous >= 0) state.results.splice(previous, 1, item);
+                else state.results.push(item);
                 state.active = item;
                 renderResults();
                 renderChatThread(item);
               }
-              if (warnings.length) failures.push(...warnings.map((item) => `${item.filename}: ${item.warning}`));
-              entry.status = "Ready"; renderResults();
-            } catch (error) { entry.status = "Error"; failures.push(`${entry.file.name}: ${error.message}`); }
-            renderFiles();
+              entry.status = "Completed";
+            } catch (error) {
+              entry.status = "Error";
+              failures.push(`${entry.file.name}: ${error.message || "Request failed."}`);
+            } finally {
+              renderFiles();
+              renderStats();
+            }
           }
+          state.errors = failures.slice();
+          renderStats();
           setNotice(failures.length ? failures.join(" · ") : "Analysis complete.", failures.length > 0);
           renderBatch(state.batch);
-        } finally { button.disabled = false; }
+        } catch (error) {
+          state.errors.push(error.message || "Analysis failed.");
+          renderStats();
+          setNotice(error.message || "Analysis failed.", true);
+        } finally {
+          state.runSeconds = Math.max(0, (performance.now() - state.runStarted) / 1000);
+          button.disabled = false;
+          renderFiles();
+          renderRunSummary();
+          await saveRunHistory();
+        }
       }
       function renderBatch(result) {
         const panel = $("#batch-panel");
         if (!result) return;
         panel.classList.add("visible");
         const output = $("#batch-results");
-        output.innerHTML = (result.results || []).map((item) => `<div class="batch-result"><span>${escapeHTML(item.filename)}</span><span class="status">${escapeHTML(item.verdict || item.status || "Completed")}</span><span>${typeof item.tampered_prob === "number" ? item.tampered_prob.toFixed(3) : "Unavailable"}</span></div>`).join("") || `<div class="notice">No image results were returned.</div>`;
+        output.innerHTML = (result.results || []).map((item) => `<div class="batch-result"><span>${escapeHTML(item.filename)}${item.reason ? ` · ${escapeHTML(item.reason)}` : ""}${item.error ? ` · ${escapeHTML(item.error)}` : ""}</span><span class="status">${escapeHTML(item.verdict || item.status || "Completed")}</span><span>${typeof item.tampered_prob === "number" ? item.tampered_prob.toFixed(3) : "Unavailable"}</span></div>`).join("") || `<div class="notice">No image results were returned.</div>`;
+        const table = $("#batch-results-table");
+        table.innerHTML = (result.results || []).map((item) => {
+          const region = item.bbox;
+          const imageSize = item.image_size || {};
+          const horizontal = Array.isArray(region) && imageSize.width ? `${Math.round(region[0] * imageSize.width)}–${Math.round(region[2] * imageSize.width)}` : "Unavailable";
+          const vertical = Array.isArray(region) && imageSize.height ? `${Math.round(region[1] * imageSize.height)}–${Math.round(region[3] * imageSize.height)}` : "Unavailable";
+          const coverage = Array.isArray(region) ? (((region[2] - region[0]) * (region[3] - region[1])) * 100).toFixed(1) : "Unavailable";
+          return `<tr><td>${escapeHTML(item.filename || "Unknown")}</td><td>${escapeHTML(item.status || "Unavailable")}</td><td>${escapeHTML(item.verdict || "Unavailable")}</td><td>${escapeHTML(formatScore(item.tampered_prob))}</td><td>H ${horizontal}, V ${vertical}</td><td>${coverage}</td></tr>`;
+        }).join("") || `<tr><td colspan="6">No file results.</td></tr>`;
         const pdfLink = $("#batch-pdf-link");
         if (result.batch_pdf) { pdfLink.classList.remove("hidden"); loadAsset(result.batch_pdf).then((url) => { if (url) pdfLink.href = url; }); }
         else pdfLink.classList.add("hidden");
         if (result.error) setNotice(result.error, true);
+        renderStats();
+        renderEvidence();
       }
       async function askAboutImage() {
         const question = $("#chat-question").value.trim();
@@ -621,7 +804,7 @@
         item.chatTurns.push(turn);
         const button = $("#chat-send"); button.disabled = true; button.setAttribute("aria-busy", "true"); renderChatThread(item, "Working…");
         try {
-          const result = await apiJSON("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: question, image_path: item.path, history: item.history, threshold: item.threshold }) });
+          const result = await apiJSON("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: question, image_path: item.path, history: item.history, threshold: item.threshold, require_llm: true, context: { filename: item.filename, verdict: item.data.verdict, tampered_score_uncalibrated: item.data.tampered_score_uncalibrated, region: item.data.region, ela_available: Boolean(item.data.ela_image_path) } }) });
           turn.reply = result;
           item.history.push({ role: "user", content: question }, { role: "assistant", content: result.answer_text || "" });
           if (result.conversation_state?.history) item.history = result.conversation_state.history;
@@ -655,6 +838,16 @@
       $("#custom-question").addEventListener("input", (event) => { state.settings.customQuestion = event.target.value.slice(0, 250); $("#char-count").textContent = String(event.target.value.length); saveSettings(); });
       $("#threshold").addEventListener("input", (event) => updateThreshold(event.target.value));
       $("#threshold-number").addEventListener("change", (event) => updateThreshold(event.target.value));
+      $("#save-analysis-settings").addEventListener("click", async () => {
+        const status = $("#settings-status");
+        const maxFileMb = Math.max(1, Math.min(500, Number($("#max-file-mb").value) || defaultSettings.maxFileMb));
+        try {
+          const saved = await apiJSON("/api/dashboard-settings", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ threshold:state.settings.threshold, max_file_bytes:Math.round(maxFileMb * 1_000_000) }) });
+          state.settings.maxFileMb = maxFileMb;
+          saveSettings();
+          status.textContent = `Saved for next run · threshold ${saved.threshold.toFixed(2)} · max ${Math.round(saved.max_file_bytes / 1_000_000)} MB`;
+        } catch (error) { status.textContent = error.message || "Could not save analysis settings."; }
+      });
       $("#goal").value = state.settings.goal;
       $("#custom-question").value = state.settings.customQuestion;
       $("#char-count").textContent = String(state.settings.customQuestion.length);
@@ -666,10 +859,12 @@
       $("#chat-question").addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#chat-send").disabled) askAboutImage(); } });
       document.querySelectorAll(".top-tab").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
       $("#export-pdf").addEventListener("click", async () => {
-        if (!state.results.length) { setNotice("Analyze at least one image before exporting a report.", true); return; }
+        const paths = [...state.results.map((item) => item.path), ...(state.batch?.image_paths || [])];
+        if (!paths.length) { setNotice("Analyze at least one image before exporting a report.", true); return; }
         const button = $("#export-pdf"); button.disabled = true;
         try {
-          const report = await apiJSON("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_paths: state.results.map((item) => item.path), threshold: state.settings.threshold }) });
+          const report = await apiJSON("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image_paths: paths, threshold: state.settings.threshold }) });
+          state.reportId = report.report_path.split("/").pop().replace(/\.pdf$/i, "");
           const url = await loadAsset(report.report_path);
           if (!url) throw new Error("The report file could not be loaded.");
           const link = document.createElement("a"); link.href = url; link.download = "deepfake-localizer-report.pdf"; link.click();
@@ -678,9 +873,81 @@
         } catch (error) { setNotice(error.message, true); }
         finally { button.disabled = false; }
       });
-      $("#download-results").addEventListener("click", () => { const blob = new Blob([JSON.stringify({ files: state.results.map(({ filename, data }) => ({ filename, ...data })), batch: state.batch }, null, 2)], { type: "application/json" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "deepfake-localizer-results.json"; link.click(); URL.revokeObjectURL(link.href); });
+      $("#download-results").addEventListener("click", async () => {
+        try {
+          const data = await apiJSON("/api/results/export", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ files:state.results.map(({filename, data}) => ({filename, ...data})), batch:state.batch, errors:state.errors, threshold:state.runThreshold ?? state.settings.threshold, processing_seconds:state.runSeconds }) });
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" }); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "deepfake-localizer-results.json"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) { setNotice(`Could not export JSON: ${error.message}`, true); }
+      });
+      $("#recent-runs").addEventListener("click", (event) => {
+        const row = event.target.closest("[data-history]");
+        if (row) loadHistory(row.dataset.history);
+      });
+      state.emailRecipients = [];
+      function setEmailError(message) {
+        const box = $("#side-email-error");
+        $("#side-email-error-text").textContent = message || "";
+        box.hidden = !message;
+      }
+      function renderRecipientChips() {
+        $("#recipient-chips").innerHTML = state.emailRecipients.map((address, index) => `<span class="recipient-chip">${escapeHTML(address)}<button class="remove-recipient" type="button" data-remove-recipient="${index}" aria-label="Remove recipient">×</button></span>`).join("");
+        $("#recipient-chips").querySelectorAll("[data-remove-recipient]").forEach((button) => button.addEventListener("click", () => { state.emailRecipients.splice(Number(button.dataset.removeRecipient), 1); renderRecipientChips(); $("#side-email-status").textContent = ""; setEmailError(""); }));
+      }
+      function addRecipientChip() {
+        const input = $("#side-email-recipient");
+        const address = input.value.trim().replace(/,$/, "");
+        if (address && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address) && !state.emailRecipients.includes(address) && state.emailRecipients.length < 10) state.emailRecipients.push(address);
+        if (address) input.value = "";
+        renderRecipientChips();
+        $("#side-email-status").textContent = "";
+        setEmailError("");
+      }
+      $("#side-add-recipient").addEventListener("click", addRecipientChip);
+      $("#side-email-recipient").addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addRecipientChip(); } });
+      $("#side-email-send").addEventListener("click", async () => {
+        const recipients = state.emailRecipients || [];
+        const status = $("#side-email-status");
+        setEmailError("");
+        status.textContent = "";
+        if (!recipients.length || recipients.length > 10) { setEmailError("Add between 1 and 10 valid recipients."); return; }
+        if (!window.confirm(`Send report to ${recipients.length} recipient${recipients.length === 1 ? "" : "s"}?`)) return;
+        const button = $("#side-email-send");
+        button.disabled = true;
+        try {
+          if (!state.reportId) {
+            const paths = [...state.results.map((item) => item.path), ...(state.batch?.image_paths || [])];
+            if (!paths.length) throw new Error("Analyze media before sending a report.");
+            const report = await apiJSON("/api/report", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ image_paths:paths, threshold:state.settings.threshold }) });
+            state.reportId = report.report_path.split("/").pop().replace(/\.pdf$/i, "");
+          }
+          const sent = await apiJSON(`/reports/${encodeURIComponent(state.reportId)}/email`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ to:recipients, message:$("#side-email-note").value.trim() || null }) });
+          status.textContent = `Report sent to ${sent.recipients} recipient(s).`;
+        } catch (error) { setEmailError(error.message || "Email delivery failed."); }
+        finally { button.disabled = false; }
+      });
+      async function sendTestEmail() {
+        setEmailError("");
+        $("#side-email-status").textContent = "";
+        const typed = $("#side-email-recipient").value.trim();
+        const recipient = typed || state.emailRecipients?.[0];
+        if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) { setEmailError("Enter a valid recipient address for the test email."); return; }
+        try { await apiJSON("/email/test", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({to:recipient}) }); $("#side-email-status").textContent = `Test email sent to ${recipient}.`; }
+        catch (error) { setEmailError(error.message || "Email delivery failed."); }
+      }
+      $("#side-test-email").addEventListener("click", sendTestEmail);
+      $("#sidebar-toggle").addEventListener("click", () => $("#run-sidebar").classList.toggle("collapsed"));
+      Promise.allSettled([apiJSON("/email/status"), apiJSON("/api/model-status"), apiJSON("/api/dashboard-settings")]).then(([email, models, settings]) => {
+        if (email.status === "fulfilled") {
+          const config = email.value;
+          $("#smtp-status").textContent = config.sender_differs ? "Sender address differs from the Gmail account; Gmail may rewrite it." : (!config.configured ? `Email setup needs: ${(config.missing || []).join(", ")}.` : "");
+        }
+        if (models.status === "fulfilled") {
+          $("#model-status").innerHTML = models.value.providers.map((item) => `<tr><td>${escapeHTML(item.provider)}</td><td>${escapeHTML(item.variable)}</td><td>${item.key_set ? "Key set" : "Key missing"}</td><td>${escapeHTML(item.model)}</td></tr>`).join("") || `<tr><td colspan="4">No providers configured.</td></tr>`;
+        }
+        if (settings.status === "fulfilled") { state.settings.maxFileMb = Math.round(settings.value.max_file_bytes / 1_000_000); updateThreshold(settings.value.threshold, false); $("#max-file-mb").value = state.settings.maxFileMb; renderRunSummary(); }
+      });
       document.addEventListener("click", (event) => { const card = event.target.closest("[data-result]"); if (card) state.active = state.results[Number(card.dataset.result)] || null; });
-      renderFiles(); renderResults();
+      renderFiles(); renderResults(); renderRunSummary(); refreshRecentRuns();
     })();
   </script>
 </body>

@@ -32,6 +32,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent.env import get_secret, load_env
+
 # Environment names (single source for where the key is looked up).
 ENV_API_KEY = "DEEPFAKE_LLM_API_KEY"
 ENV_MODEL = "DEEPFAKE_LLM_MODEL"
@@ -84,12 +86,13 @@ class LLMClient:
         timeout_seconds: float | None = None,
     ) -> None:
         from agent.agent_config import get_agent_config
+        load_env()
 
         config = get_agent_config()
         self.api_key_env = str(config["api_key_env"])
         self.api_key = api_key
         if self.api_key is None:
-            self.api_key = os.environ.get(ENV_API_KEY) or os.environ.get(self.api_key_env)
+            self.api_key = get_secret(ENV_API_KEY) or get_secret(self.api_key_env)
         self.model = model if model is not None else (os.environ.get(ENV_MODEL) or config["model"])
         self.base_url = base_url
         if self.base_url is None:

@@ -1,0 +1,96 @@
+- generic [ref=f2e2]:
+  - banner [ref=f2e3]:
+    - generic "Deepfake Localizer" [ref=f2e4]
+    - navigation "Workspace views" [ref=f2e10]:
+      - button "Overview" [ref=f2e11] [cursor=pointer]
+      - button "Batch analysis" [ref=f2e14] [cursor=pointer]
+      - button "Reports" [ref=f2e18] [cursor=pointer]
+    - generic [ref=f2e22]:
+      - button "Toggle theme" [ref=f2e23] [cursor=pointer]
+      - button "Open analysis settings" [ref=f2e27] [cursor=pointer]
+      - button "Profile" [ref=f2e31] [cursor=pointer]
+  - main [ref=f2e36]:
+    - generic [ref=f2e37]:
+      - generic [ref=f2e38]:
+        - heading "Media authenticity analysis" [level=1] [ref=f2e39]
+        - paragraph [ref=f2e40]: Detect suspicious edits and inspect likely tampered regions.
+      - region [ref=f2e41]:
+        - heading "Upload media" [level=2] [ref=f2e42]
+        - generic [ref=f2e46] [cursor=pointer]:
+          - generic [ref=f2e50]: Drop images or a ZIP here
+          - generic [ref=f2e51]: Supports JPG, PNG, WEBP, BMP, TIFF, ZIP
+        - button "Drop images or a ZIP here Supports JPG, PNG, WEBP, BMP, TIFF, ZIP" [ref=f2e52]
+        - generic [ref=f2e53]:
+          - generic [ref=f2e54]:
+            - generic [ref=f2e55]: 1 file uploaded
+            - button "Clear all" [ref=f2e56] [cursor=pointer]
+          - generic [ref=f2e138]:
+            - generic [ref=f2e140]:
+              - generic "img.png" [ref=f2e141]
+              - generic [ref=f2e142]: 0.1 KB · Image
+            - generic [ref=f2e143]: Completed
+            - button "Remove img.png" [ref=f2e145] [cursor=pointer]: ×
+        - generic [ref=f2e57]: Analysis complete.
+      - button "Analyze media" [ref=f2e58] [cursor=pointer]
+    - region "Analysis results" [ref=f2e61]:
+      - region "Analysis summary" [ref=f2e62]:
+        - generic [ref=f2e69]:
+          - generic [ref=f2e70]: "1"
+          - generic [ref=f2e71]: Files analysed
+        - generic [ref=f2e77]:
+          - generic [ref=f2e78]: "0"
+          - generic [ref=f2e79]: Flagged for review
+        - generic [ref=f2e85]:
+          - generic [ref=f2e86]: "0"
+          - generic [ref=f2e87]: Errors
+      - article "Select img.png for follow-up questions" [ref=f2e146]:
+        - heading "1. img.png · Selected" [level=3] [ref=f2e147]
+        - generic [ref=f2e148]:
+          - generic [ref=f2e149]:
+            - 'img "Original image: img.png" [ref=f2e151]'
+            - generic [ref=f2e152]: Original
+          - generic [ref=f2e153]:
+            - generic "Annotated image showing tampered region when available" [ref=f2e155]
+            - generic [ref=f2e156]: Annotated (no region localized)
+        - generic [ref=f2e157]:
+          - generic [ref=f2e158]:
+            - generic [ref=f2e159]: Findings
+            - generic [ref=f2e160]: Not flagged by this detector
+            - generic [ref=f2e161]: Tampered score (uncalibrated)
+            - generic [ref=f2e162]: "7.553e-7"
+          - generic [ref=f2e163]:
+            - generic [ref=f2e164]: Checks completed
+            - list [ref=f2e165]:
+              - listitem [ref=f2e166]:
+                - generic [ref=f2e167]: ✓
+                - text: Image inspection
+              - listitem [ref=f2e168]:
+                - generic [ref=f2e169]: ✓
+                - text: Run localizer
+              - listitem [ref=f2e170]:
+                - generic [ref=f2e171]: ✓
+                - text: Validate prediction
+      - generic [ref=f2e96]:
+        - heading "ELA evidence" [level=2] [ref=f2e97]
+        - generic [ref=f2e102]: ELA evidence will appear for completed checks.
+      - generic [ref=f2e104]:
+        - heading "Ask about this image" [level=2] [ref=f2e105]
+        - generic [ref=f2e108]:
+          - textbox "Ask about this image" [ref=f2e109]:
+            - /placeholder: e.g. Where might the image have been edited?
+          - button "Send question" [ref=f2e110] [cursor=pointer]
+        - generic [ref=f2e113]:
+          - button "Export PDF report" [ref=f2e114] [cursor=pointer]
+          - button "Download results" [ref=f2e118] [cursor=pointer]
+        - generic [ref=f2e122]:
+          - generic [ref=f2e123]:
+            - text: Email report to
+            - textbox "Email report to" [ref=f2e124]:
+              - /placeholder: name@example.com
+              - text: bad-address
+          - generic [ref=f2e125]:
+            - text: Optional note
+            - textbox "Optional note" [ref=f2e126]:
+              - /placeholder: Add a short note
+          - button "Email report" [ref=f2e127] [cursor=pointer]
+          - generic [ref=f2e128]: Enter a valid recipient email address.

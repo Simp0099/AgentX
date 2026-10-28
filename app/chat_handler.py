@@ -285,6 +285,7 @@ def _structured_reply(
             "height": height,
         },
         "processing_seconds": processing_seconds,
+        "model_version": (localized or {}).get("model_version") or record.model_version,
         "region": region,
         "coverage_percent": coverage_percent,
         "caveat": CAVEAT_TEXT,

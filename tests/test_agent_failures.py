@@ -221,7 +221,7 @@ def test_transient_retries_twice_then_falls_back(tmp_path, monkeypatch):
     ]
 
 
-def test_fatal_error_does_not_fall_back(tmp_path, monkeypatch):
+def test_fatal_error_falls_back_to_next_provider(tmp_path, monkeypatch):
     _config(monkeypatch, tmp_path)
     endpoints = loop.model_entries(loop.get_agent_config())
     client = FakeClient([RuntimeError("400 invalid request: malformed tool schema")])
@@ -229,9 +229,8 @@ def test_fatal_error_does_not_fall_back(tmp_path, monkeypatch):
     result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
 
     assert result.stopped_reason == "model_unavailable"
-    assert len(client.requests) == 1
-    assert endpoints[0]["model"] in result.answer
-    assert "fatal" in result.answer and "invalid request" in result.answer
+    assert len(client.requests) == 3
+    assert endpoints[0]["model"] in result.errors[0]
 
 
 def test_cooled_down_model_is_skipped_on_next_turn(tmp_path, monkeypatch):
@@ -276,6 +275,8 @@ def test_unconfigured_provider_keys_are_skipped_before_routing(tmp_path, monkeyp
 
     def build(endpoint):
         created.append(endpoint)
+        if endpoint["api_key_env"] != "GEMINI_API_KEY":
+            return None
         return FakeClient([make_message(content="Gemini free fallback response")])
 
     monkeypatch.setattr(loop, "_build_client", build)
@@ -284,8 +285,8 @@ def test_unconfigured_provider_keys_are_skipped_before_routing(tmp_path, monkeyp
     )
 
     assert result.answer.startswith("Gemini free fallback response")
-    assert created[0]["model"] == endpoints[2]["model"]
-    assert created[0]["api_key_env"] == "GEMINI_API_KEY"
+    assert created[-1]["model"] == endpoints[1]["model"]
+    assert created[-1]["api_key_env"] == "GEMINI_API_KEY"
 
 
 def test_no_configured_free_model_key_returns_clear_unavailable(tmp_path, monkeypatch):

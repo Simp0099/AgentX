@@ -64,6 +64,7 @@ BACKOFF_SECONDS = (1.0, 2.0)
 # Attempts against one model before moving to the next one.
 MAX_PROVIDER_RETRIES = 2
 _MODEL_COOLDOWNS: dict[str, float] = {}
+LAST_USED_MODELS: dict[str, str] = {}
 _LOGGER = logging.getLogger(__name__)
 
 ENV_UPLOAD_ROOT = "AGENT_UPLOAD_ROOT"
@@ -96,8 +97,9 @@ def _provider_failure(exc: Exception) -> ProviderFailure:
             retry_after = (
                 max(
                     0.0,
-                    (parsedate_to_datetime(str(retry_after_value)) - datetime.now(timezone.utc))
-                    .total_seconds(),
+                    (
+                        parsedate_to_datetime(str(retry_after_value)) - datetime.now(timezone.utc)
+                    ).total_seconds(),
                 )
                 if retry_after_value is not None
                 else None
@@ -110,11 +112,19 @@ def _provider_failure(exc: Exception) -> ProviderFailure:
         match = re.search(r"\b([45]\d\d)\b", text)
         status = int(match.group(1)) if match else None
     cause = f"{type(exc).__name__}: {text[:300]}"
-    if status == 429 or (retry_after is not None and status is None) or any(
-        term in lowered
-        for term in (
-            "quota", "rate limit", "rate-limit", "too many requests",
-            "token exhausted", "token exhaustion",
+    if (
+        status == 429
+        or (retry_after is not None and status is None)
+        or any(
+            term in lowered
+            for term in (
+                "quota",
+                "rate limit",
+                "rate-limit",
+                "too many requests",
+                "token exhausted",
+                "token exhaustion",
+            )
         )
     ):
         return ProviderFailure("quota", cause, retry_after)
@@ -188,9 +198,10 @@ def _build_client(endpoint: dict[str, Any]) -> Any:
     value never appears here or in any log.
     """
     env_name = str(endpoint["api_key_env"])
+    load_env()
     key = os.environ.get(env_name, "").strip()
     if not key or key.casefold() in {"your_key_here", "replace_me", "changeme", "placeholder"}:
-        raise RuntimeError(f"environment variable {env_name} is not set")
+        return None
     config = get_agent_config()
     if str(endpoint["provider"]).lower() == "anthropic":
         return _AnthropicCompatClient(
@@ -206,31 +217,6 @@ def _build_client(endpoint: dict[str, Any]) -> Any:
         timeout=float(config["request_timeout_seconds"]),
         max_retries=0,  # retries are ours, so they are counted and bounded
     )
-
-
-def _configured_endpoints(
-    endpoints: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Keep configured free-tier routes whose credential names have usable keys.
-
-    ``configs/agent.yaml`` contains only the free models approved for routing.
-    This filters providers that are not configured in the current process so a
-    missing fallback key cannot leave the previous provider client active.
-    Values are checked in memory and never returned or logged.
-    """
-    load_env()
-    usable: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    for endpoint in endpoints:
-        key_name = str(endpoint["api_key_env"])
-        key = os.environ.get(key_name, "").strip()
-        if key and key.casefold() not in {
-            "your_key_here", "replace_me", "changeme", "placeholder"
-        }:
-            usable.append(endpoint)
-        else:
-            skipped.append(f"{endpoint['model']} (missing {key_name})")
-    return usable, skipped
 
 
 class _AnthropicCompatClient:
@@ -252,9 +238,7 @@ class _AnthropicCompatClient:
         temperature: float = 0.0,
     ) -> Any:
         system = "\n\n".join(
-            str(item.get("content") or "")
-            for item in messages
-            if item.get("role") == "system"
+            str(item.get("content") or "") for item in messages if item.get("role") == "system"
         )
         converted: list[dict[str, Any]] = []
         for item in messages:
@@ -559,14 +543,13 @@ def _model_verdict(answer: str) -> Verdict | None:
     return None
 
 
-def _assess_answer(
-    answer: str, record: InvestigationRecord, grounded: Verdict
-) -> tuple[str, str]:
+def _assess_answer(answer: str, record: InvestigationRecord, grounded: Verdict) -> tuple[str, str]:
     """Append computed review/confidence guidance from recorded evidence."""
     from agent.config import get_config
 
     clean_lines = [
-        line for line in answer.splitlines()
+        line
+        for line in answer.splitlines()
         if not line.startswith("Needs human review:")
         and line not in {"Confidence: low.", "Confidence: medium.", "Confidence: high."}
     ]
@@ -623,14 +606,7 @@ def run_agent_full(
 
     messages = _initial_messages(goal, image_path, history, config)
     record = _new_record(goal, image_path)
-    skipped_models: list[str] = []
-    if client is None:
-        endpoints, skipped_models = _configured_endpoints(endpoints)
-        if not endpoints:
-            detail = "no configured free-model credentials"
-            if skipped_models:
-                detail += "; skipped: " + ", ".join(skipped_models)
-            return _unavailable(record, messages, 0, detail)
+    load_env()
     ctx = ToolContext(
         upload_root=_upload_root(),
         threshold=_default_threshold() if threshold is None else float(threshold),
@@ -675,39 +651,39 @@ def run_agent_full(
     answer = ""
     stopped_reason = "final_answer"
     active = client
+    clients: dict[int, Any] = {0: client} if client is not None else {}
     identical_calls: dict[str, int] = {}
     retry_limit_reached = False
 
     tried: list[str] = []
     unavailable: list[str] = []
 
-    def select_available(start: int) -> int | None:
-        now = time.monotonic()
+    def select_usable(start: int) -> int | None:
         for candidate in range(start, len(endpoints)):
             candidate_model = str(endpoints[candidate]["model"])
-            deadline = _MODEL_COOLDOWNS.get(candidate_model, 0.0)
-            if deadline <= now:
-                return candidate
+            if _MODEL_COOLDOWNS.get(candidate_model, 0.0) > time.monotonic():
+                continue
+            if candidate not in clients:
+                clients[candidate] = _build_client(endpoints[candidate])
+            if clients[candidate] is None:
+                env_name = str(endpoints[candidate]["api_key_env"])
+                detail = f"skipped {candidate_model}: {env_name} not set"
+                record.errors.append(detail)
+                unavailable.append(detail)
+                continue
+            return candidate
         return None
 
-    selected = select_available(0)
+    selected = select_usable(0)
     if selected is None:
         cooling = [str(item["model"]) for item in endpoints]
-        detail = "all configured free models are cooling down; models: " + ", ".join(cooling)
-        if skipped_models:
-            detail += "; skipped: " + ", ".join(skipped_models)
+        detail = "no configured free-model credentials"
+        if unavailable:
+            detail += "; skipped: " + "; ".join(unavailable)
         return _unavailable(record, messages, steps, detail, cooling)
     endpoint_index = selected
     if active is None:
-        try:
-            active = _build_client(endpoints[endpoint_index])
-        except Exception as exc:
-            failure = _provider_failure(exc)
-            tried.append(str(endpoints[endpoint_index]["model"]))
-            unavailable.append(
-                f"{endpoints[endpoint_index]['model']} ({failure.category}: {failure.cause})"
-            )
-            return _unavailable(record, messages, steps, "; ".join(unavailable), tried)
+        active = clients[endpoint_index]
 
     while True:
         if steps >= limit:
@@ -740,16 +716,23 @@ def run_agent_full(
                 continue
             if failure.category == "fatal":
                 detail = f"{model_name} failed ({failure.category}): {failure.cause}"
+                unavailable.append(detail)
                 record.errors.append(detail)
-                _log_switch(model_name, None, f"{failure.category}: {type(exc).__name__}")
-                return _unavailable(record, messages, steps, detail, tried)
+                next_index = select_usable(endpoint_index + 1)
+                if next_index is None:
+                    return _unavailable(record, messages, steps, "; ".join(unavailable), tried)
+                endpoint_index = next_index
+                if client is None:
+                    active = clients[endpoint_index]
+                retries = 0
+                continue
             if failure.category == "quota":
                 cooldown = float(config.get("cooldown_seconds", 900))
                 _MODEL_COOLDOWNS[model_name] = time.monotonic() + cooldown
             detail = f"{model_name} failed ({failure.category}): {failure.cause}"
             unavailable.append(detail)
             record.errors.append(detail)
-            next_index = select_available(endpoint_index + 1)
+            next_index = select_usable(endpoint_index + 1)
             retries = 0
             if next_index is None:
                 _log_switch(model_name, None, failure.category)
@@ -769,16 +752,10 @@ def run_agent_full(
             )
             endpoint_index = next_index
             if client is None:
-                try:
-                    active = _build_client(endpoints[endpoint_index])
-                except Exception as build_exc:
-                    build_failure = _provider_failure(build_exc)
-                    unavailable.append(
-                        f"{next_model} failed ({build_failure.category}): {build_failure.cause}"
-                    )
-                    continue
+                active = clients[endpoint_index]
             continue
 
+        LAST_USED_MODELS[str(endpoint["provider"])] = model_name
         steps += 1
         retries = 0
         message = response.choices[0].message

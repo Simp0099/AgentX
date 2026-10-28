@@ -20,9 +20,9 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent.loop import AgentResult  # noqa: E402
 from agent import api  # noqa: E402
 from agent.agent_tools import TOOL_SCHEMAS, TOOLS  # noqa: E402
+from agent.loop import AgentResult  # noqa: E402
 
 
 class StubDetector:
@@ -209,6 +209,87 @@ def test_chat_returns_structured_evidence_card(client, image, monkeypatch):
     assert followup.status_code == 200
     assert followup.json()["conversation_state"]["image_path"] == saved_path
     assert not body["answer_text"].startswith("Model unavailable:")
+
+
+def test_analyze_image_endpoint_returns_results_and_ela(client, image):
+    response = client.post(
+        "/api/analyze-image",
+        json={
+            "image_path": str(image),
+            "goal": "quick_check",
+            "threshold": 0.5,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["image"]["filename"] == image.name
+    assert "tampered_score_uncalibrated" in payload
+    assert payload["tool_log"]
+    assert payload["conversation_state"]["image_path"] == str(image.resolve())
+
+
+def test_chat_requires_key_and_sends_analysis_context(client, image, monkeypatch):
+    from agent import env
+    from app import chat_handler
+
+    monkeypatch.setattr(env, "get_secret", lambda _name: None)
+    missing = client.post(
+        "/api/chat",
+        json={"message": "What do you see?", "image_path": str(image), "require_llm": True},
+    )
+    assert missing.status_code == 503
+    assert "OPENROUTER_API_KEY" in missing.json()["detail"]
+
+    captured = {}
+
+    def fake_chat(message, _image, _state, **_kwargs):
+        captured["message"] = message
+        return {"answer_text": "context used", "_state": {"history": [], "image_path": str(image)}}
+
+    monkeypatch.setattr(chat_handler, "agent_chat", fake_chat)
+    monkeypatch.setattr(env, "get_secret", lambda _name: "offline-test-key")
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "What do you see?",
+            "image_path": str(image),
+            "require_llm": True,
+            "context": {
+                "filename": "sample.jpg",
+                "verdict": "Inconclusive",
+                "tampered_score_uncalibrated": 0.4,
+                "ela_available": True,
+            },
+        },
+    )
+    assert response.status_code == 200
+    assert "sample.jpg" in captured["message"]
+    assert "tampered_score_uncalibrated" in captured["message"]
+
+
+def test_batch_route_returns_per_file_zip_results(client, upload_dir):
+    from zipfile import ZIP_DEFLATED, ZipFile
+
+    image_buffer = BytesIO()
+    Image.new("RGB", (10, 8), "navy").save(image_buffer, format="JPEG")
+    archive_buffer = BytesIO()
+    with ZipFile(archive_buffer, "w", ZIP_DEFLATED) as archive:
+        archive.writestr(".DS_Store", b"junk")
+        archive.writestr("__MACOSX/._hidden.jpg", b"junk")
+        archive.writestr("photo.jpg", image_buffer.getvalue())
+        archive.writestr("notes.txt", b"unsupported")
+    uploaded = client.post(
+        "/api/upload?filename=photos.zip",
+        content=archive_buffer.getvalue(),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert uploaded.status_code == 200
+    result = client.post("/api/batch", json={"zip_path": uploaded.json()["image_path"]})
+    assert result.status_code == 200
+    rows = result.json()["results"]
+    assert any(row["filename"] == "photo.jpg" for row in rows)
+    skipped = next(row for row in rows if row["filename"] == "notes.txt")
+    assert skipped["status"] == "Skipped" and skipped["reason"] == "not an image"
 
 
 def test_report_export_returns_generated_pdf(client, image):

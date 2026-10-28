@@ -276,7 +276,13 @@ AI-generated images.
 See [INFERENCE.md](INFERENCE.md#agent-chat), [docs/limitations.md](docs/limitations.md#agent-chat-and-deployment-failure-modes),
 [docs/wiring.md](docs/wiring.md), and [docs/deploy_checklist.md](docs/deploy_checklist.md).
 Evaluation details are in [docs/evaluation.md](docs/evaluation.md).
-Email is not implemented; specifically, email delivery is not implemented.
+### Email reports
+
+Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and
+optionally `SMTP_FROM` and `SMTP_STARTTLS` in `.env`. Gmail requires a
+16-character app password from a Google account with 2-Step Verification
+enabled; do not use your normal account password. The protected
+`POST /reports/{report_id}/email` endpoint sends an existing PDF report.
 
 ### Agent model comparison
 

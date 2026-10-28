@@ -9,10 +9,8 @@
 # gitignored .env.
 #
 # Primary and fallbacks are the measured ranking from docs/model_selection.md:
-# highest tool-call success rate first, ties broken by lower median latency.
-# Runtime routing is deliberately limited to the four verified free models
-# below. OpenCode Zen community models were rejected by direct API probes and
-# are usable only inside the OpenCode client.
+# Routing order is primary OpenRouter, Gemini, then OpenCode Zen.
+# Runtime routing follows the configured provider order below.
 
 agent:
   # ---- primary (Phase 1 selection) ----
@@ -26,18 +24,14 @@ agent:
 
   # ---- fallbacks, in the order they should be tried ----
   fallback_models:
-    - provider: openrouter
-      model: "nvidia/nemotron-3-ultra-550b-a55b:free"
-      base_url: "https://openrouter.ai/api/v1"
-      api_key_env: OPENROUTER_API_KEY
     - provider: gemini
-      model: "gemini-3.6-flash"
-      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      model: "gemini-3.8-flash"
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
       api_key_env: GEMINI_API_KEY
-    - provider: gemini
-      model: "gemini-3.5-flash-lite"
-      base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
-      api_key_env: GEMINI_API_KEY
+    - provider: opencode_zen
+      model: "glm-5.3-flash-free"
+      base_url: "https://opencode.ai/inference/openai/v1"
+      api_key_env: OPENCODE_ZEN_API_KEY
 
   # ---- loop bounds ----
   max_steps: 6

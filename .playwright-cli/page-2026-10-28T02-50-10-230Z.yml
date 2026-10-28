@@ -1,0 +1,139 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic "Deepfake Localizer" [ref=e4]
+    - navigation "Workspace views" [ref=e10]:
+      - button "Overview" [ref=e11] [cursor=pointer]
+      - button "Batch analysis" [ref=e14] [cursor=pointer]
+      - button "Reports" [ref=e18] [cursor=pointer]
+    - generic [ref=e22]:
+      - button "Toggle theme" [ref=e23] [cursor=pointer]
+      - button "Open analysis settings" [ref=e27] [cursor=pointer]
+      - button "Profile" [ref=e31] [cursor=pointer]
+  - main [ref=e36]:
+    - generic [ref=e37]:
+      - generic [ref=e38]:
+        - heading "Media authenticity analysis" [level=1] [ref=e39]
+        - paragraph [ref=e40]: Detect suspicious edits and inspect likely tampered regions.
+      - region [ref=e41]:
+        - heading "Upload media" [level=2] [ref=e42]
+        - generic [ref=e46] [cursor=pointer]:
+          - generic [ref=e50]: Drop images or a ZIP here
+          - generic [ref=e51]: Supports JPG, PNG, WEBP, BMP, TIFF, ZIP
+        - button "Drop images or a ZIP here Supports JPG, PNG, WEBP, BMP, TIFF, ZIP" [ref=e52]
+        - generic [ref=e54]:
+          - generic [ref=e55]: 0 files uploaded
+          - button "Clear all" [ref=e56] [cursor=pointer]
+      - button "Analyze media" [ref=e58] [cursor=pointer]
+    - region "Analysis results" [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - region "Analysis summary" [ref=e64]:
+            - generic [ref=e71]:
+              - generic [ref=e72]: "0"
+              - generic [ref=e73]: Files analysed
+            - generic [ref=e79]:
+              - generic [ref=e80]: "0"
+              - generic [ref=e81]: Flagged for review
+            - generic [ref=e87]:
+              - generic [ref=e88]: "0"
+              - generic [ref=e89]: Errors
+          - generic [ref=e90]: Analysis results appear here after you analyze media.
+          - generic [ref=e98]:
+            - heading "ELA evidence" [level=2] [ref=e99]
+            - generic [ref=e104]: ELA evidence will appear for completed checks.
+          - generic [ref=e106]:
+            - heading "Ask about this image" [level=2] [ref=e107]
+            - generic [ref=e110]:
+              - textbox "Ask about this image" [ref=e111]:
+                - /placeholder: e.g. Where might the image have been edited?
+              - button "Send question" [ref=e112] [cursor=pointer]
+          - group [ref=e115]:
+            - generic "How to read results" [ref=e116] [cursor=pointer]
+        - complementary "Run tools and status" [ref=e117]:
+          - heading "Run tools" [level=2] [ref=e119]
+          - generic [ref=e120]:
+            - generic [ref=e121]:
+              - heading "Run summary" [level=3] [ref=e122]
+              - table [ref=e124]:
+                - rowgroup [ref=e125]:
+                  - row [ref=e126]:
+                    - columnheader "Metric" [ref=e127]
+                    - columnheader "Value" [ref=e128]
+                - rowgroup [ref=e129]:
+                  - row [ref=e216]:
+                    - cell "Files analysed" [ref=e217]
+                    - cell "0" [ref=e218]
+                  - row [ref=e219]:
+                    - cell "Flagged" [ref=e220]
+                    - cell "0" [ref=e221]
+                  - row [ref=e222]:
+                    - cell "Errors" [ref=e223]
+                    - cell "0" [ref=e224]
+                  - row [ref=e225]:
+                    - cell "Processing time" [ref=e226]
+                    - cell "0.00 s" [ref=e227]
+                  - row [ref=e228]:
+                    - cell "Threshold used" [ref=e229]
+                    - cell "0.50" [ref=e230]
+            - generic [ref=e145]:
+              - heading "Recent runs" [level=3] [ref=e146]
+              - table [ref=e148]:
+                - rowgroup [ref=e149]:
+                  - row [ref=e150]:
+                    - columnheader "File" [ref=e151]
+                    - columnheader "Verdict" [ref=e152]
+                    - columnheader "Score" [ref=e153]
+                    - columnheader "Time" [ref=e154]
+                - rowgroup [ref=e155]:
+                  - row [ref=e156]:
+                    - cell [ref=e157]:
+                      - button "one.png" [active] [ref=e158] [cursor=pointer]
+                    - cell "Not flagged by this detector" [ref=e159]
+                    - cell "Unavailable" [ref=e160]
+                    - cell "10/28/2026, 8:02:22 AM" [ref=e161]
+                  - row [ref=e162]:
+                    - cell [ref=e163]:
+                      - button "Screenshot 2026-10-24 at 4.14.03 PM.png" [ref=e164] [cursor=pointer]
+                    - cell "Flagged for review" [ref=e165]
+                    - cell "0.976" [ref=e166]
+                    - cell "10/28/2026, 7:46:39 AM" [ref=e167]
+            - generic [ref=e168]:
+              - heading "Report actions" [level=3] [ref=e169]
+              - generic [ref=e170]:
+                - button "Export PDF" [ref=e171] [cursor=pointer]
+                - button "Download JSON" [ref=e172] [cursor=pointer]
+              - generic [ref=e173]:
+                - generic [ref=e174]:
+                  - textbox "Recipient email" [ref=e175]
+                  - button "Add" [ref=e176] [cursor=pointer]
+                - generic [ref=e177]: Optional note
+                - textbox "Optional note" [ref=e178]:
+                  - /placeholder: Add a short note
+                - button "Send report" [ref=e179] [cursor=pointer]
+                - button "Send test email" [ref=e180] [cursor=pointer]
+            - generic [ref=e181]:
+              - heading "Model status" [level=3] [ref=e182]
+              - table [ref=e184]:
+                - rowgroup [ref=e185]:
+                  - row [ref=e186]:
+                    - columnheader "Provider" [ref=e187]
+                    - columnheader "Key variable" [ref=e188]
+                    - columnheader "Status" [ref=e189]
+                    - columnheader "Model" [ref=e190]
+                - rowgroup [ref=e191]:
+                  - row [ref=e192]:
+                    - cell "openrouter" [ref=e193]
+                    - cell "OPENROUTER_API_KEY" [ref=e194]
+                    - cell "Key set" [ref=e195]
+                    - cell "nvidia/nemotron-3.5-lightning:free" [ref=e196]
+                  - row [ref=e197]:
+                    - cell "gemini" [ref=e198]
+                    - cell "GEMINI_API_KEY" [ref=e199]
+                    - cell "Key set" [ref=e200]
+                    - cell "gemini-3.8-flash" [ref=e201]
+                  - row [ref=e202]:
+                    - cell "opencode_zen" [ref=e203]
+                    - cell "OPENCODE_ZEN_API_KEY" [ref=e204]
+                    - cell "Key set" [ref=e205]
+                    - cell "glm-5.3-flash-free" [ref=e206]
+              - generic [ref=e207]: "Last run model: Deterministic fixed pipeline"

@@ -1,0 +1,18 @@
+- generic [ref=e4]:
+  - paragraph [ref=e20]: Loading...
+  - generic [ref=e21]:
+    - main [ref=e22]
+    - status [ref=e23]
+    - contentinfo "Gradio footer navigation" [ref=e24]:
+      - button [ref=e25] [cursor=pointer]:
+        - text: Use via API
+        - img "logo" [ref=e26]
+      - generic [ref=e27]: ·
+      - link [ref=e28] [cursor=pointer]:
+        - /url: https://gradio.app
+        - text: Built with Gradio
+        - img "logo" [ref=e29]
+      - generic [ref=e30]: ·
+      - button [ref=e31] [cursor=pointer]:
+        - text: Settings
+        - img "Settings" [ref=e32]
