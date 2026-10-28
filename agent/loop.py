@@ -544,16 +544,43 @@ def _model_verdict(answer: str) -> Verdict | None:
 
 
 def _assess_answer(answer: str, record: InvestigationRecord, grounded: Verdict) -> tuple[str, str]:
-    """Append computed review/confidence guidance from recorded evidence."""
-    from agent.config import get_config
+    """Append review guidance and the required limits to an answer."""
+    import re
 
+    from agent.config import get_config
+    from agent.prompts import CAVEAT_TEXT
+
+    caveat_heading = "Limits you must state rather than hide"
+    if caveat_heading in answer:
+        answer = answer.split(caveat_heading, 1)[0].rstrip()
     clean_lines = [
         line
         for line in answer.splitlines()
         if not line.startswith("Needs human review:")
-        and line not in {"Confidence: low.", "Confidence: medium.", "Confidence: high."}
+        and not re.match(r"\s*(?:[*_#]+\s*)?(?:confidence|probability|likelihood)\s*:", line, re.I)
     ]
-    answer = "\n".join(clean_lines).rstrip()
+    answer = "\n".join(clean_lines).strip()
+    answer = re.sub(
+        r"(?i)\b(?:this\s+)?image\s+(?:clearly\s+)?(?:proves?|demonstrates)\b"
+        r"[^.!?\n]*[.!?]?",
+        "The detector output is a review signal, not proof.",
+        answer,
+    )
+    answer = re.sub(
+        r"(?i)(?<!not )\b(?:strong\s+)?evidence\s+of\s+(?:image\s+)?"
+        r"(?:splicing|tampering|manipulation)\b",
+        "a region flagged for review by the detector",
+        answer,
+    )
+    answer = re.sub(
+        r"(?i)\bflagged\s+(?:the\s+)?image\s+for\s+review\s+as\s+"
+        r"(?:tampered|manipulated|spliced)\b",
+        "flagged the image for review",
+        answer,
+    )
+    answer = re.sub(
+        r"(?im)^.*\b(?:confidence|probability|likelihood)\b.*$", "", answer
+    ).strip()
     settings = get_config().get("forensics", {})
     low = float(settings.get("uncertain_low", 0.4))
     high = float(settings.get("uncertain_high", 0.6))
@@ -580,7 +607,7 @@ def _assess_answer(answer: str, record: InvestigationRecord, grounded: Verdict) 
     confidence = "low" if reasons else "high" if score is not None else "medium"
     if reasons:
         answer += "\n\nNeeds human review: " + "; ".join(reasons) + "."
-    answer += f"\n\nConfidence: {confidence}."
+    answer = f"{answer}\n\n{CAVEAT_TEXT}" if answer else CAVEAT_TEXT
     return answer, confidence
 
 

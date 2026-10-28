@@ -13,17 +13,21 @@
 # Runtime routing follows the configured provider order below.
 
 agent:
-  # ---- primary (Phase 1 selection) ----
-  provider: openrouter
-  model: "nvidia/nemotron-3.5-lightning:free"
-  base_url: "https://openrouter.ai/api/v1"
-  api_key_env: OPENROUTER_API_KEY
+  # ---- primary (Gemini) ----
+  provider: gemini
+  model: "gemini-2.5-flash"
+  base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
+  api_key_env: GEMINI_API_KEY
   provider_base_urls:
     anthropic: "https://api.anthropic.com/v1"
     openai: "https://api.openai.com/v1"
 
   # ---- fallbacks, in the order they should be tried ----
   fallback_models:
+    - provider: openrouter
+      model: "nvidia/nemotron-3.5-lightning:free"
+      base_url: "https://openrouter.ai/api/v1"
+      api_key_env: OPENROUTER_API_KEY
     - provider: gemini
       model: "gemini-3.8-flash"
       base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -36,7 +40,7 @@ agent:
   # ---- loop bounds ----
   max_steps: 6
   temperature: 0.0
-  request_timeout_seconds: 30
+  request_timeout_seconds: 15
   retry_after_max_seconds: 60
   cooldown_seconds: 900
   # Re-sending an identical tool call is allowed this many times, then the

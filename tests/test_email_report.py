@@ -26,6 +26,9 @@ class FakeSMTP:
     def login(self, username, password):
         self.credentials = (username, password)
 
+    def starttls(self):
+        self.tls = True
+
     def send_message(self, message):
         self.message = message
 
@@ -106,7 +109,7 @@ def test_email_api_auth_unknown_and_valid(configured, monkeypatch):
         ),
         (
             smtplib.SMTPAuthenticationError(534, b"secret-value"),
-            "Gmail rejected the login. Use a 16-character App Password",
+            "SMTP authentication failed (code 534)",
         ),
         (
             smtplib.SMTPSenderRefused(550, b"secret-value", "sender@example.com"),
@@ -118,10 +121,11 @@ def test_email_api_auth_unknown_and_valid(configured, monkeypatch):
         ),
         (
             smtplib.SMTPServerDisconnected("secret-value"),
-            "Could not connect to smtp.gmail.com:465.",
+            "secret-value",
         ),
-        (ssl.SSLError("secret-value"), "Could not connect to smtp.gmail.com:465."),
-        (TimeoutError("secret-value"), "Could not connect to smtp.gmail.com:465."),
+        (ssl.SSLError("secret-value"), "secret-value"),
+        (TimeoutError("secret-value"), "Network blocked outbound SMTP on port 465; try 587"),
+        (ConnectionRefusedError("secret-value"), "Network blocked outbound SMTP on port 465; try 587"),
     ],
 )
 def test_smtp_failures_are_mapped_and_logs_never_contain_password(
@@ -132,13 +136,15 @@ def test_smtp_failures_are_mapped_and_logs_never_contain_password(
             raise error
 
     monkeypatch.setattr(email_report.smtplib, "SMTP_SSL", FailedSMTP)
+    monkeypatch.setattr(email_report.smtplib, "SMTP", FailedSMTP)
     monkeypatch.setenv("SMTP_PASSWORD", " secret-value ")
     with caplog.at_level(logging.WARNING):
         with pytest.raises(type(error)) as caught:
             email_report.send_report_email(
                 ["to@example.com"], "Subject", "secret-value", configured
             )
-    assert expected in email_report.smtp_error_message(caught.value)
+    mapped = email_report.smtp_error_message(caught.value, port=465)
+    assert expected in mapped
     assert "secret-value" not in caplog.text
     assert "to@example.com" not in caplog.text
     assert "WARNING" in caplog.text
@@ -150,6 +156,20 @@ def test_password_whitespace_is_stripped_and_from_defaults(configured, monkeypat
     email_report.send_report_email(["to@example.com"], "Subject", "Body", configured)
     assert FakeSMTP.instance.credentials[1] == "apppassword"
     assert FakeSMTP.instance.message["From"] == "user@example.com"
+
+
+def test_587_uses_starttls_transport(configured, monkeypatch):
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setattr(email_report.smtplib, "SMTP", FakeSMTP)
+    email_report.send_report_email(["to@example.com"], "Subject", "Body", configured)
+    assert FakeSMTP.instance.args[:2] == ("smtp.example.com", 587)
+    assert FakeSMTP.instance.tls is True
+
+
+def test_test_email_uses_shared_sender(configured, monkeypatch):
+    email_report.send_test_email("me@example.com")
+    assert FakeSMTP.instance.message["To"] == "me@example.com"
+    assert "test" in FakeSMTP.instance.message["Subject"].lower()
 
 
 def test_email_status_and_test_email_routes_are_token_protected(configured, monkeypatch):

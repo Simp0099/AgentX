@@ -151,7 +151,8 @@ def test_borderline_score_adds_review_line_and_low_confidence(tmp_path, monkeypa
     assert result.confidence == "low"
     assert "Needs human review:" in result.answer
     assert "uncertain range" in result.answer
-    assert "Confidence: low." in result.answer
+    assert "Confidence:" not in result.answer
+    assert "Limits you must state rather than hide" in result.answer
 
 
 def test_reflection_disabled_makes_one_model_call(tmp_path, monkeypatch):
@@ -229,7 +230,7 @@ def test_fatal_error_falls_back_to_next_provider(tmp_path, monkeypatch):
     result = loop.run_agent_full("quick_check", str(_image(tmp_path)), client=client, use_memory=False)
 
     assert result.stopped_reason == "model_unavailable"
-    assert len(client.requests) == 3
+    assert len(client.requests) == len(endpoints)
     assert endpoints[0]["model"] in result.errors[0]
 
 
@@ -267,26 +268,26 @@ def test_unconfigured_provider_keys_are_skipped_before_routing(tmp_path, monkeyp
     _config(monkeypatch, tmp_path)
     endpoints = loop.model_entries(loop.get_agent_config())
     monkeypatch.setattr(loop, "load_env", lambda: None)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setenv("GEMINI_API_KEY", "offline-test-key")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-test-key")
     monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
 
     created = []
 
     def build(endpoint):
         created.append(endpoint)
-        if endpoint["api_key_env"] != "GEMINI_API_KEY":
+        if endpoint["api_key_env"] != "OPENROUTER_API_KEY":
             return None
-        return FakeClient([make_message(content="Gemini free fallback response")])
+        return FakeClient([make_message(content="OpenRouter free fallback response")])
 
     monkeypatch.setattr(loop, "_build_client", build)
     result = loop.run_agent_full(
         "quick_check", str(_image(tmp_path)), client=None, use_memory=False
     )
 
-    assert result.answer.startswith("Gemini free fallback response")
+    assert result.answer.startswith("OpenRouter free fallback response")
     assert created[-1]["model"] == endpoints[1]["model"]
-    assert created[-1]["api_key_env"] == "GEMINI_API_KEY"
+    assert created[-1]["api_key_env"] == "OPENROUTER_API_KEY"
 
 
 def test_no_configured_free_model_key_returns_clear_unavailable(tmp_path, monkeypatch):

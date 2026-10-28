@@ -20,13 +20,13 @@ def setup(monkeypatch, tmp_path):
 
 def test_missing_primary_key_falls_through(tmp_path, monkeypatch):
     endpoints, image = setup(monkeypatch, tmp_path)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     clients = {endpoints[1]["model"]: FakeClient([make_message(content="Gemini answer")])}
     monkeypatch.setattr(loop, "_build_client", lambda endpoint: clients.get(endpoint["model"]))
     result = loop.run_agent_full("quick_check", str(image), use_memory=False)
     assert result.answer.startswith("Gemini answer")
-    assert f"skipped {endpoints[0]['model']}: OPENROUTER_API_KEY not set" in result.errors
+    assert f"skipped {endpoints[0]['model']}: GEMINI_API_KEY not set" in result.errors
 
 
 def test_429_on_primary_uses_next_provider(tmp_path, monkeypatch):
@@ -55,7 +55,7 @@ def test_env_loader_is_called_before_key_lookup(tmp_path, monkeypatch):
     loaded = []
     def load_file():
         loaded.append(True)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "file-key")
+        monkeypatch.setenv("GEMINI_API_KEY", "file-key")
     monkeypatch.setattr(loop, "load_env", load_file)
     monkeypatch.setattr(loop, "get_agent_config", lambda: {"request_timeout_seconds": 1})
     import sys
@@ -70,7 +70,7 @@ def test_env_loader_is_called_before_key_lookup(tmp_path, monkeypatch):
 
 def test_shell_variable_overrides_env_loader(tmp_path, monkeypatch):
     endpoints, _image = setup(monkeypatch, tmp_path)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "shell-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "shell-key")
     monkeypatch.setattr(loop, "load_env", lambda: None)
     monkeypatch.setattr(loop, "get_agent_config", lambda: {"request_timeout_seconds": 1})
     import sys

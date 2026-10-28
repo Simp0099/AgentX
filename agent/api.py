@@ -383,49 +383,24 @@ def model_status() -> dict[str, Any]:
 @app.post("/email/test", dependencies=[Depends(require_token)])
 def test_email(payload: TestEmailRequest) -> dict[str, str]:
     """Send a short SMTP setup test without a report attachment."""
-    import smtplib
-    from email.message import EmailMessage
-
     from agent.email_report import (
-        _ADDRESS,
-        _LOGGER,
+        EmailNotConfigured,
         email_settings,
+        send_test_email,
         smtp_error_message,
-        smtp_exception_code,
     )
-    from agent.env import get_secret
 
-    settings = email_settings()
-    if not settings["configured"]:
-        raise HTTPException(
-            status_code=503, detail="Missing SMTP configuration: " + ", ".join(settings["missing"])
-        )
-    if not _ADDRESS.fullmatch(payload.to):
-        raise HTTPException(status_code=400, detail="Enter a valid recipient address.")
-    username = get_secret("SMTP_USERNAME") or ""
-    password = "".join((get_secret("SMTP_PASSWORD") or "").split())
-    message = EmailMessage()
-    message["Subject"] = "Deepfake Localizer email test"
-    message["From"] = settings["from"]
-    message["To"] = payload.to
-    message.set_content("Your email delivery setup is working.")
     try:
-        if settings["starttls"]:
-            with smtplib.SMTP(str(settings["host"]), int(settings["port"]), timeout=20) as smtp:
-                smtp.starttls()
-                smtp.login(username, password)
-                smtp.send_message(message)
-        else:
-            with smtplib.SMTP_SSL(str(settings["host"]), int(settings["port"]), timeout=20) as smtp:
-                smtp.login(username, password)
-                smtp.send_message(message)
+        send_test_email(payload.to)
+    except EmailNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except Exception as exc:
-        _LOGGER.warning(
-            "test email failed error_type=%s smtp_code=%s",
-            type(exc).__name__,
-            smtp_exception_code(exc),
-        )
-        raise HTTPException(status_code=502, detail=smtp_error_message(exc)) from None
+        port = int(email_settings()["port"])
+        raise HTTPException(
+            status_code=502, detail=smtp_error_message(exc, port)
+        ) from None
     return {"status": "sent"}
 
 
@@ -477,6 +452,26 @@ def list_history() -> list[dict[str, Any]]:
             continue
     limit = int(load_ui_settings()["history_keep"])
     return sorted(runs, key=lambda run: run.get("created_at", ""), reverse=True)[:limit]
+
+
+@app.delete("/api/history", dependencies=[Depends(require_token)])
+def clear_history() -> dict[str, Any]:
+    """Delete all saved conversation/run history files."""
+    directory = _history_dir()
+    deleted = 0
+    for path in directory.glob("*.json"):
+        try:
+            path.unlink()
+            deleted += 1
+        except OSError:
+            continue
+    try:
+        from agent.memory_store import clear_memory
+
+        clear_memory()
+    except Exception:
+        pass
+    return {"status": "deleted", "deleted": deleted}
 
 
 @app.post("/api/history", dependencies=[Depends(require_token)])
@@ -575,6 +570,15 @@ def chat(payload: ChatRequest) -> dict[str, Any]:
         threshold=payload.threshold,
     )
     reply = {key: value for key, value in result.items() if not key.startswith("_")}
+    from agent.loop import LAST_USED_MODELS
+    from agent.markdown_render import render_safe_markdown
+
+    reply["last_run_model"] = (
+        next(reversed(LAST_USED_MODELS.values()), "Configured language model")
+        if reply.get("mode") != "fixed_pipeline"
+        else "Deterministic fixed pipeline"
+    )
+    reply["answer_html"] = render_safe_markdown(str(reply.get("answer_text", "")))
     internal_state = result.get("_state")
     if isinstance(internal_state, dict):
         reply["conversation_state"] = {
@@ -626,6 +630,10 @@ def analyze_image(payload: AnalyzeImageRequest) -> dict[str, Any]:
         {},
         generated_ela_path,
     )
+    from agent.markdown_render import render_safe_markdown
+
+    reply["answer_html"] = render_safe_markdown(str(reply.get("answer_text", "")))
+    reply["last_run_model"] = "Deterministic fixed pipeline"
     context = {
         "filename": image_path.name,
         "verdict": reply["verdict"],

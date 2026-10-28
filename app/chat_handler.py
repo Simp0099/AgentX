@@ -18,6 +18,7 @@ from PIL import Image
 from agent.agent_tools import ToolContext, run_tool
 from agent.loop import AgentResult, run_agent_full
 from agent.memory_store import image_hash
+from agent.reporting import generate_pdf
 from agent.orchestrator import run_investigation
 from agent.prompts import CAVEAT_TEXT
 from agent.rendering import escape_untrusted
@@ -199,12 +200,15 @@ def _ok_result(record: Any, tool_name: str) -> dict[str, Any] | None:
 
 
 def _fixed_answer(record: Any) -> str:
-    """Summarize only the verdict and score actually present in the record."""
+    """Summarize recorded findings and retain the detector limits."""
     verdict = record.verdict.value if record.verdict else "Inconclusive"
     localizer = _ok_result(record, "run_localizer")
     score = localizer.get("tampered_prob") if localizer else None
     score_text = f"{score}" if isinstance(score, (int, float)) else "unavailable"
-    return f"Verdict: {verdict}. Tampered score (uncalibrated): {score_text}."
+    return (
+        f"Verdict: {verdict}. Tampered score (uncalibrated): {score_text}.\n\n"
+        f"{CAVEAT_TEXT}"
+    )
 
 
 def _structured_reply(
@@ -276,6 +280,19 @@ def _structured_reply(
     if ela_path is None:
         ela_path = generated_ela_path
 
+    report_path = None
+    report_url = None
+    try:
+        report_dir = Path.cwd() / "artifacts" / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        candidate = report_dir / f"chat-report-{uuid.uuid4().hex}.pdf"
+        generate_pdf(record, candidate)
+        report_path = str(candidate.resolve())
+        report_url = "/api/assets?path=" + str(candidate.resolve())
+    except Exception:
+        report_path = None
+        report_url = None
+
     return {
         "verdict": verdict,
         "tampered_score_uncalibrated": score,
@@ -291,6 +308,12 @@ def _structured_reply(
         "caveat": CAVEAT_TEXT,
         "answer_text": answer_text,
         "tool_log": tool_log,
+        "report_path": report_path,
+        "report_url": report_url,
+        "download_url": report_url,
+        "report_download_url": report_url,
+        "download_link": report_url,
+        "report_link": report_url,
         "ela_image_path": ela_path,
         "mode": mode,
         "_state": state,
@@ -310,6 +333,12 @@ def _empty_reply(answer_text: str, history: list[dict[str, Any]], mode: str) -> 
         "answer_text": answer_text,
         "tool_log": [],
         "ela_image_path": None,
+        "report_path": None,
+        "report_url": None,
+        "download_url": None,
+        "report_download_url": None,
+        "download_link": None,
+        "report_link": None,
         "mode": mode,
         "_state": {"history": history, "image_path": None, "image_hash": None},
     }

@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 from agent import loop  # noqa: E402
 from agent.agent_config import get_agent_config, model_entries  # noqa: E402
-from agent.schemas import Verdict  # noqa: E402
+from agent.schemas import InvestigationRecord, Verdict  # noqa: E402
 from tests.fakes import FakeClient, make_message, make_tool_call, tool_messages  # noqa: E402
 
 
@@ -127,7 +127,8 @@ def test_direct_final_answer_returns_text_and_messages(image):
     answer, messages = loop.run_agent("quick_check", str(image), client=client)
 
     assert answer.startswith("Verdict: nothing to flag.")
-    assert "Confidence: medium." in answer
+    assert "Confidence:" not in answer
+    assert "Limits you must state rather than hide" in answer
     assert isinstance(messages, list)
     assert messages[0]["role"] == "system"
     user_turn = next(item for item in reversed(messages) if item["role"] == "user")
@@ -136,6 +137,34 @@ def test_direct_final_answer_returns_text_and_messages(image):
     assert messages[-1]["role"] == "assistant"
     assert messages[-1]["content"] == answer
     assert len(client.requests) == 1
+
+
+def test_summary_postprocessing_removes_proof_confidence_and_probability_language():
+    record = InvestigationRecord(
+        investigation_id="id",
+        image_id="hash",
+        filename="image.png",
+        goal="quick_check",
+        goal_text="",
+        threshold=0.5,
+        config_snapshot_hash="config",
+        model_version="model",
+        observations=[],
+        errors=[],
+        rationale="",
+    )
+    answer, _ = loop._assess_answer(
+        "The image proves tampering. It shows strong evidence of splicing.\n"
+        "Confidence: high. The score is a probability of tampering.",
+        record,
+        Verdict.FLAGGED_FOR_REVIEW,
+    )
+    assert "proves tampering" not in answer
+    assert "strong evidence of splicing" not in answer
+    assert "Confidence: high" not in answer
+    assert "probability of tampering" not in answer
+    assert "review signal, not proof" in answer
+    assert "Limits you must state rather than hide" in answer
 
 
 # ---------------------------------------------------------------------------

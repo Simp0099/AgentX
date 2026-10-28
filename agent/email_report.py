@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import smtplib
-import ssl
+import socket
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -29,24 +29,27 @@ def email_settings() -> dict[str, object]:
         for name, value in (("SMTP_USERNAME", username), ("SMTP_PASSWORD", password))
         if not value
     ]
+    port = int(get_secret("SMTP_PORT") or "587")
+    starttls = port == 587 if port in (465, 587) else (
+        (get_secret("SMTP_STARTTLS") or "true").strip().lower() == "true"
+    )
     return {
         "configured": not missing,
         "missing": missing,
         "host": get_secret("SMTP_HOST") or "smtp.gmail.com",
-        "port": int(get_secret("SMTP_PORT") or "465"),
-        "starttls": (get_secret("SMTP_STARTTLS") or "false").strip().lower() == "true",
+        "port": port,
+        "starttls": starttls,
         "from": get_secret("SMTP_FROM") or username or "",
     }
 
 
-def smtp_error_message(exc: Exception) -> str:
+def smtp_error_message(exc: Exception, port: int | None = None) -> str:
     """Map common SMTP errors to actionable text without exposing credentials."""
     if isinstance(exc, smtplib.SMTPAuthenticationError):
-        if exc.smtp_code in (534, 535):
+        if exc.smtp_code == 535:
             return (
-                "Gmail rejected the login. Use a 16-character App Password from a Google account "
-                "with 2-Step Verification on, not your normal password. "
-                "Remove any spaces from the password."
+                "Gmail rejected the login. Use a 16-character App Password, "
+                "not your account password."
             )
         return (
             f"SMTP authentication failed (code {exc.smtp_code}). "
@@ -62,12 +65,10 @@ def smtp_error_message(exc: Exception) -> str:
             code = response[0] if isinstance(response, tuple) and response else "unknown"
             refusals.append(f"{address} (code {code})")
         return "SMTP refused recipient address " + ", ".join(refusals) + "."
-    if isinstance(exc, (smtplib.SMTPServerDisconnected, ssl.SSLError, TimeoutError, OSError)):
-        return (
-            "Could not connect to smtp.gmail.com:465. Check your network or try "
-            "SMTP_PORT=587 with SMTP_STARTTLS=true."
-        )
-    return f"Email delivery failed ({type(exc).__name__}). Check SMTP settings and try again."
+    active_port = port if port is not None else int(email_settings()["port"])
+    if isinstance(exc, (TimeoutError, socket.timeout, ConnectionRefusedError)):
+        return f"Network blocked outbound SMTP on port {active_port}; try 587"
+    return str(exc) or f"Email delivery failed ({type(exc).__name__})."
 
 
 def smtp_exception_code(exc: Exception) -> int | str | None:
@@ -80,6 +81,63 @@ def smtp_exception_code(exc: Exception) -> int | str | None:
         ]
         return ",".join(map(str, codes)) or None
     return getattr(exc, "smtp_code", None)
+
+
+def effective_smtp_config() -> dict[str, str]:
+    """Return printable effective settings with the password always masked."""
+    settings = email_settings()
+    username = get_secret("SMTP_USERNAME") or "<missing>"
+    mode = "STARTTLS" if settings["starttls"] else "implicit SSL"
+    return {
+        "host": str(settings["host"]),
+        "port": str(settings["port"]),
+        "mode": mode,
+        "username": username,
+        "password": "********" if get_secret("SMTP_PASSWORD") else "<missing>",
+    }
+
+
+def send_message_via_smtp(message: EmailMessage) -> None:
+    """Send one prepared email using port-selected TLS and shared credentials."""
+    settings = email_settings()
+    if settings["missing"]:
+        raise EmailNotConfigured("Missing SMTP configuration: " + ", ".join(settings["missing"]))
+    port = int(settings["port"])
+    if port not in (465, 587):
+        raise ValueError("SMTP_PORT must be 465 (implicit SSL) or 587 (STARTTLS).")
+    username = get_secret("SMTP_USERNAME") or ""
+    password = "".join((get_secret("SMTP_PASSWORD") or "").split())
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(str(settings["host"]), port, timeout=20) as smtp:
+                smtp.login(username, password)
+                smtp.send_message(message)
+        else:
+            with smtplib.SMTP(str(settings["host"]), port, timeout=20) as smtp:
+                smtp.starttls()
+                smtp.login(username, password)
+                smtp.send_message(message)
+    except Exception as exc:
+        _LOGGER.warning(
+            "smtp send failed error_type=%s smtp_code=%s port=%s",
+            type(exc).__name__,
+            smtp_exception_code(exc),
+            port,
+        )
+        raise
+
+
+def send_test_email(to: str) -> None:
+    """Send the short setup message through the same transport as reports."""
+    if not _ADDRESS.fullmatch(to):
+        raise ValueError("Enter a valid recipient address.")
+    settings = email_settings()
+    message = EmailMessage()
+    message["Subject"] = "Deepfake Localizer email test"
+    message["From"] = str(settings["from"])
+    message["To"] = to
+    message.set_content("Your email delivery setup is working.")
+    send_message_via_smtp(message)
 
 
 def send_report_email(to: list[str], subject: str, body: str, attachment_path: Path) -> None:
@@ -95,44 +153,17 @@ def send_report_email(to: list[str], subject: str, body: str, attachment_path: P
     if candidate.stat().st_size > _MAX_ATTACHMENT_BYTES:
         raise ValueError("Report attachment exceeds 20 MB.")
 
-    settings = {
-        "SMTP_HOST": get_secret("SMTP_HOST") or "smtp.gmail.com",
-        "SMTP_PORT": get_secret("SMTP_PORT") or "465",
-        "SMTP_USERNAME": get_secret("SMTP_USERNAME"),
-        "SMTP_PASSWORD": "".join((get_secret("SMTP_PASSWORD") or "").split()),
-        "SMTP_FROM": get_secret("SMTP_FROM") or get_secret("SMTP_USERNAME"),
-        "SMTP_STARTTLS": get_secret("SMTP_STARTTLS") or "false",
-    }
-    missing = [key for key in ("SMTP_USERNAME", "SMTP_PASSWORD") if not settings[key]]
-    if missing:
-        raise EmailNotConfigured("Missing SMTP configuration: " + ", ".join(missing))
-    try:
-        port = int(settings["SMTP_PORT"])
-    except ValueError:
-        raise ValueError("SMTP_PORT must be a number.") from None
+    settings = email_settings()
+    if settings["missing"]:
+        raise EmailNotConfigured("Missing SMTP configuration: " + ", ".join(settings["missing"]))
 
     message = EmailMessage()
     message["Subject"] = subject
-    message["From"] = settings["SMTP_FROM"] or settings["SMTP_USERNAME"]
+    message["From"] = settings["from"]
     message["To"] = ", ".join(to)
     message.set_content(body)
     message.add_attachment(
         candidate.read_bytes(), maintype="application", subtype="pdf", filename=candidate.name
     )
-    try:
-        if settings["SMTP_STARTTLS"].strip().lower() == "true":
-            with smtplib.SMTP(settings["SMTP_HOST"], port, timeout=20) as smtp:
-                smtp.starttls()
-                smtp.login(settings["SMTP_USERNAME"], settings["SMTP_PASSWORD"])
-                smtp.send_message(message)
-        else:
-            with smtplib.SMTP_SSL(settings["SMTP_HOST"], port, timeout=20) as smtp:
-                smtp.login(settings["SMTP_USERNAME"], settings["SMTP_PASSWORD"])
-                smtp.send_message(message)
-    except Exception as exc:
-        smtp_code = smtp_exception_code(exc)
-        _LOGGER.warning(
-            "report email failed error_type=%s smtp_code=%s", type(exc).__name__, smtp_code
-        )
-        raise
+    send_message_via_smtp(message)
     _LOGGER.info("report email sent report_id=%s recipients=%d", candidate.stem, len(to))

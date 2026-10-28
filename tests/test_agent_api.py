@@ -76,8 +76,8 @@ def test_health_reports_ok(client):
 
 def test_api_health_reports_llm_availability_without_credential_values(client, monkeypatch):
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -86,7 +86,7 @@ def test_api_health_reports_llm_availability_without_credential_values(client, m
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["llm"]["available"] is False
-    assert "OPENROUTER_API_KEY" in response.json()["llm"]["reason"]
+    assert "GEMINI_API_KEY" in response.json()["llm"]["reason"]
 
 
 def test_root_serves_standalone_dashboard(client):
@@ -238,7 +238,7 @@ def test_chat_requires_key_and_sends_analysis_context(client, image, monkeypatch
         json={"message": "What do you see?", "image_path": str(image), "require_llm": True},
     )
     assert missing.status_code == 503
-    assert "OPENROUTER_API_KEY" in missing.json()["detail"]
+    assert "GEMINI_API_KEY" in missing.json()["detail"]
 
     captured = {}
 

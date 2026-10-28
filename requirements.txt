@@ -16,6 +16,7 @@ reportlab>=4.0
 openai>=1.40
 python-dotenv>=1.0
 jsonschema>=4.0
+markdown-it-py>=3.0
 
 # Agent API layer. httpx is required by fastapi.testclient.TestClient.
 fastapi>=0.110

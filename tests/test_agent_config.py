@@ -97,9 +97,9 @@ def test_config_loads_with_every_required_field():
 def test_primary_is_the_phase_one_selection():
     config = get_agent_config()
 
-    assert config["provider"] == "openrouter"
-    assert config["model"] == "nvidia/nemotron-3.5-lightning:free"
-    assert config["api_key_env"] == "OPENROUTER_API_KEY"
+    assert config["provider"] == "gemini"
+    assert config["model"] == "gemini-2.5-flash"
+    assert config["api_key_env"] == "GEMINI_API_KEY"
 
 
 @pytest.mark.parametrize(
